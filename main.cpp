@@ -837,10 +837,38 @@ static void StartTask(const std::wstring& name, std::function<std::wstring()> fn
     }).detach();
 }
 static void AddButton(HWND parent, const wchar_t* label, int id, int x, int y, int w=150) {
-    CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,x,y,w,30,parent,(HMENU)(INT_PTR)id,g_instance,nullptr);
+    CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,x,y,w,32,parent,(HMENU)(INT_PTR)id,g_instance,nullptr);
 }
 enum { ID_HARDWARE=100, ID_SMART, ID_TEST_STATUS, ID_TEST_SHORT, ID_TEST_LONG, ID_DISKS, ID_DIAG, ID_PROCESSES,
        ID_STARTUP, ID_RAM, ID_TBW, ID_TEMP, ID_BENCH, ID_SAVE, ID_CANCEL_TEST };
+static COLORREF ButtonColor(int id) {
+    if(id>=ID_HARDWARE && id<=ID_DISKS) return RGB(18,145,190);
+    if(id>=ID_TEST_STATUS && id<=ID_CANCEL_TEST) return RGB(105,78,195);
+    if(id>=ID_DIAG && id<=ID_STARTUP) return RGB(20,150,125);
+    if(id==ID_RAM || id==ID_TBW) return RGB(40,115,195);
+    if(id==ID_TEMP || id==ID_BENCH) return RGB(195,120,35);
+    return RGB(45,105,175);
+}
+static void DrawColorButton(const DRAWITEMSTRUCT* d) {
+    RECT r=d->rcItem; COLORREF c=ButtonColor((int)d->CtlID);
+    if(d->itemState&ODS_DISABLED) c=RGB(75,82,100);
+    if(d->itemState&ODS_SELECTED) c=RGB(35,65,105);
+    for(int y=r.top;y<r.bottom;++y) {
+        int k=((y-r.top)*30)/std::max(1,r.bottom-r.top);
+        COLORREF line=RGB((BYTE)std::max(0,(int)GetRValue(c)-k),(BYTE)std::max(0,(int)GetGValue(c)-k),(BYTE)std::max(0,(int)GetBValue(c)-k));
+        HPEN p=CreatePen(PS_SOLID,1,line); HGDIOBJ old=SelectObject(d->hDC,p);
+        MoveToEx(d->hDC,r.left+4,y,nullptr); LineTo(d->hDC,r.right-4,y);
+        SelectObject(d->hDC,old); DeleteObject(p);
+    }
+    HPEN edge=CreatePen(PS_SOLID,1,RGB(95,190,225)); HGDIOBJ op=SelectObject(d->hDC,edge);
+    HGDIOBJ ob=SelectObject(d->hDC,GetStockObject(NULL_BRUSH));
+    RoundRect(d->hDC,r.left+1,r.top+1,r.right-1,r.bottom-1,10,10);
+    SelectObject(d->hDC,op); SelectObject(d->hDC,ob); DeleteObject(edge);
+    SetBkMode(d->hDC,TRANSPARENT); SetTextColor(d->hDC,RGB(255,255,255));
+    wchar_t label[256]{}; GetWindowTextW(d->hwndItem,label,256);
+    DrawTextW(d->hDC,label,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
+    if(d->itemState&ODS_FOCUS) { InflateRect(&r,-4,-4); DrawFocusRect(d->hDC,&r); }
+}
 static void SaveReport() {
     wchar_t file[MAX_PATH]=L"PC_Performance_Report.txt";
     OPENFILENAMEW ofn{}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=g_window; ofn.lpstrFilter=L"Текстовые файлы (*.txt)\0*.txt\0Все файлы\0*.*\0";
@@ -874,6 +902,23 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             10,126,1110,570,hwnd,(HMENU)200,g_instance,nullptr);
         g_status=CreateWindowW(L"STATIC",L"Готово",WS_CHILD|WS_VISIBLE,10,704,1100,24,hwnd,(HMENU)201,g_instance,nullptr);
         return 0;
+    }
+    case WM_ERASEBKGND: {
+        RECT r{}; GetClientRect(hwnd,&r); HBRUSH b=CreateSolidBrush(RGB(13,20,38));
+        FillRect((HDC)wp,&r,b); DeleteObject(b); return 1;
+    }
+    case WM_DRAWITEM: {
+        const DRAWITEMSTRUCT* d=(const DRAWITEMSTRUCT*)lp;
+        if(d && d->CtlType==ODT_BUTTON) { DrawColorButton(d); return TRUE; }
+        break;
+    }
+    case WM_CTLCOLORSTATIC: {
+        HDC dc=(HDC)wp; SetTextColor(dc,RGB(195,220,245)); SetBkColor(dc,RGB(13,20,38));
+        static HBRUSH b=CreateSolidBrush(RGB(13,20,38)); return (LRESULT)b;
+    }
+    case WM_CTLCOLOREDIT: {
+        HDC dc=(HDC)wp; SetTextColor(dc,RGB(220,235,250)); SetBkColor(dc,RGB(20,31,52));
+        static HBRUSH b=CreateSolidBrush(RGB(20,31,52)); return (LRESULT)b;
     }
     case WM_SIZE: {
         if(g_output) MoveWindow(g_output,10,126,LOWORD(lp)-20,HIWORD(lp)-160,TRUE);
@@ -931,16 +976,35 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd,msg,wp,lp);
 }
 
-int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int nCmdShow) {
-    g_instance=hInst;
-    INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_STANDARD_CLASSES}; InitCommonControlsEx(&ic);
+static void StartupLog(const wchar_t* stage, DWORD errorCode=0) {
+    std::wofstream f(AppDataDir()+L"\\\\startup.log",std::ios::app);
+    if(f) f<<Timestamp()<<L" | "<<stage<<L" | GetLastError="<<errorCode<<L"\\r\\n";
+}
+int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int) {
+    g_instance=hInst; StartupLog(L"process started");
+    INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_STANDARD_CLASSES};
+    if(!InitCommonControlsEx(&ic)) StartupLog(L"InitCommonControlsEx failed",GetLastError());
     WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=hInst; wc.lpszClassName=L"PCPM_CPP_X64";
     wc.hCursor=LoadCursor(nullptr,IDC_ARROW); wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
-    RegisterClassW(&wc);
-    HWND hwnd=CreateWindowW(wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.3.8",
-        WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,1160,790,nullptr,nullptr,hInst,nullptr);
-    if(!hwnd) return 1;
-    ShowWindow(hwnd,nCmdShow); UpdateWindow(hwnd);
-    MSG msg{}; while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
-    return (int)msg.wParam;
+    if(!RegisterClassW(&wc) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) {
+        DWORD e=GetLastError(); StartupLog(L"RegisterClassW failed",e);
+        MessageBoxW(nullptr,L"Не удалось зарегистрировать окно. См. startup.log",L"PC Performance Monitor",MB_OK|MB_ICONERROR); return (int)e;
+    }
+    StartupLog(L"window class registered");
+    HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.3.8",
+        WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1180,820,nullptr,nullptr,hInst,nullptr);
+    if(!hwnd) {
+        DWORD e=GetLastError(); StartupLog(L"CreateWindowExW failed",e);
+        MessageBoxW(nullptr,L"Не удалось создать окно. См. %LOCALAPPDATA%\\PCPerformanceMonitor\\startup.log",L"PC Performance Monitor",MB_OK|MB_ICONERROR); return (int)e;
+    }
+    StartupLog(L"main window created"); ShowWindow(hwnd,SW_SHOWNORMAL); SetForegroundWindow(hwnd); UpdateWindow(hwnd);
+    StartupLog(IsWindowVisible(hwnd)?L"window shown":L"window not visible",GetLastError());
+    MSG msg{};
+    for(;;) {
+        BOOL r=GetMessageW(&msg,nullptr,0,0);
+        if(r==0) break;
+        if(r==-1) { DWORD e=GetLastError(); StartupLog(L"GetMessageW failed",e); return (int)e; }
+        TranslateMessage(&msg); DispatchMessageW(&msg);
+    }
+    StartupLog(L"message loop ended"); return (int)msg.wParam;
 }
