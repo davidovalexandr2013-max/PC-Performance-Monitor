@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - ci/windows-x64-v1.3.5
+      - ads-local-v1.4.1
     paths:
       - "main.cpp"
       - "ads/**"
