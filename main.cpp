@@ -1092,25 +1092,51 @@ static void DrawColorButton(const DRAWITEMSTRUCT* d) {
     DrawTextW(d->hDC,label,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
     if(d->itemState&ODS_FOCUS) { InflateRect(&r,-4,-4); DrawFocusRect(d->hDC,&r); }
 }
-static void SaveReport() {
-    wchar_t file[MAX_PATH]=L"PC_Performance_Report.txt";
-    OPENFILENAMEW ofn{}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=g_window; ofn.lpstrFilter=L"Текстовые файлы (*.txt)\0*.txt\0Все файлы\0*.*\0";
-    ofn.lpstrFile=file; ofn.nMaxFile=MAX_PATH; ofn.Flags=OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST; ofn.lpstrDefExt=L"txt";
-    if(GetSaveFileNameW(&ofn)) {
-        int n=GetWindowTextLengthW(g_output); std::wstring s(n+1,L'\0'); GetWindowTextW(g_output,s.data(),n+1); s.resize(n);
-        std::wofstream f(file);
-        if(f) {
-            f << s << L"\r\n\r\n=== АВТОМАТИЧЕСКИЙ ЖУРНАЛ ТЕКУЩЕГО СЕАНСА ===\r\n";
-            std::lock_guard<std::mutex> lock(g_sessionMutex);
-            std::wifstream log(g_sessionLogPath);
-            if(log) f << log.rdbuf();
-            else f << L"Журнал текущего сеанса недоступен.\r\n";
-            SetStatus(L"Отчёт и журнал сеанса сохранены");
-        } else {
-            SetStatus(L"Не удалось сохранить отчёт");
-            SessionLog(L"REPORT_SAVE_ERROR | " + std::to_wstring(GetLastError()));
-        }
+static std::wstring BuildFullReport() {
+    std::wstringstream report;
+    report << L"PC PERFORMANCE MONITOR — ПОЛНЫЙ ОТЧЁТ\\r\\n";
+    report << L"Дата формирования: " << Timestamp() << L"\\r\\n";
+    report << L"Версия: 1.3.9 x64\\r\\n";
+    report << L"\\r\\n========== 1. ОБОРУДОВАНИЕ И ОПЕРАТИВНАЯ ПАМЯТЬ ==========\\r\\n" << HardwareReport();
+    report << L"\\r\\n========== 2. ПРОЦЕССЫ И РАСХОД ОЗУ ==========\\r\\n" << ProcessReport();
+    report << L"\\r\\n========== 3. СЛУЖБЫ WINDOWS ==========\\r\\n" << ServicesReport();
+    report << L"\\r\\n========== 4. НАКОПИТЕЛИ И СВОБОДНОЕ МЕСТО ==========\\r\\n" << DiskList();
+    report << L"\\r\\n========== 5. SMART / NVME ==========\\r\\n" << SmartReport();
+    report << L"\\r\\n========== 6. ВОЗМОЖНОСТИ ПРОВЕРКИ ДИСКОВ ==========\\r\\n" << SmartTests();
+    report << L"\\r\\n========== 7. АППАРАТНЫЕ ОШИБКИ WINDOWS ==========\\r\\n" << DiagnosticsReport();
+    report << L"\\r\\n========== 8. АВТОЗАГРУЗКА ==========\\r\\n" << StartupReport();
+    report << L"\\r\\n========== 9. ВРЕМЕННЫЕ ФАЙЛЫ ==========\\r\\n" << TempScan();
+    report << L"\\r\\n========== 10. СОСТОЯНИЕ ОЗУ ==========\\r\\n" << RamIndex();
+    report << L"\\r\\n========== 11. ИСТОРИЯ ЗАПИСИ SSD ==========\\r\\n" << TbwReport();
+    report << L"\\r\\n========== ЖУРНАЛ ТЕКУЩЕГО СЕАНСА ==========\\r\\n";
+    {
+        std::lock_guard<std::mutex> lock(g_sessionMutex);
+        std::wifstream log(g_sessionLogPath);
+        if(log) report << log.rdbuf();
+        else report << L"Журнал сеанса недоступен.\\r\\n";
     }
+    return report.str();
+}
+static std::wstring SaveFullReport() {
+    std::wstring body=BuildFullReport();
+    PWSTR documents=nullptr;
+    std::wstring folder=L".";
+    if(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents,0,nullptr,&documents)) && documents) {
+        folder=documents; CoTaskMemFree(documents);
+    }
+    SYSTEMTIME now{}; GetLocalTime(&now);
+    wchar_t name[128]{};
+    swprintf_s(name,L"PC_Performance_Report_%04u%02u%02u_%02u%02u%02u.txt",
+        now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute,now.wSecond);
+    std::wstring path=folder+L"\\ "+name;
+    path=folder+L"\\"+name;
+    const std::string utf8=Utf8(body);
+    std::ofstream file(fs::path(path),std::ios::binary|std::ios::trunc);
+    if(!file) return L"ОШИБКА: не удалось создать файл отчёта. Путь: "+path+L"\\r\\n";
+    file.write(utf8.data(),(std::streamsize)utf8.size());
+    file.flush();
+    if(!file.good()) return L"ОШИБКА: не удалось полностью записать отчёт. Путь: "+path+L"\\r\\n";
+    return L"ОТЧЁТ УСПЕШНО СОЗДАН\\r\\nФайл: "+path+L"\\r\\nРазмер: "+std::to_wstring(utf8.size())+L" байт\\r\\nРазделов: 11 + журнал сеанса.\\r\\n";
 }
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch(msg) {
@@ -1192,7 +1218,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case ID_TBW: StartTask(L"История TBW",TbwReport); break;
         case ID_TEMP: StartTask(L"Анализ временных файлов",TempScan); break;
         case ID_BENCH: if(MessageBoxW(hwnd,L"Выполнить запись тестового файла 128 MiB на системный временный каталог? Данные теста будут удалены.",L"Подтверждение",MB_YESNO|MB_ICONWARNING)==IDYES) StartTask(L"Тест записи",Benchmark); break;
-        case ID_SAVE: SaveReport(); break;
+        case ID_SAVE: StartTask(L"Формирование и сохранение полного отчёта",SaveFullReport); break;
         }
         return 0;
     case WM_APP_RESULT: {
