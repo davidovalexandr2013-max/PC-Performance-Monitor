@@ -151,7 +151,9 @@ struct NvmeHealth {
     bool ok = false;
     double temperatureC = 0;
     unsigned spare = 0, used = 0;
-    unsigned long long dataUnitsWritten = 0, powerCycles = 0, powerOnHours = 0, unsafeShutdowns = 0, mediaErrors = 0;
+    // NVMe counters are 128-bit little-endian values. Keep their full decimal
+    // representation; silently truncating to 64 bits corrupts long-running-drive statistics.
+    std::wstring dataUnitsWritten, powerCycles, powerOnHours, unsafeShutdowns, mediaErrors;
     std::wstring error;
 };
 
@@ -194,17 +196,33 @@ static NvmeHealth ReadNvmeHealth(unsigned diskNo) {
         r.error = L"Некорректная длина NVMe Health Log"; return r;
     }
     const BYTE* d = reinterpret_cast<const BYTE*>(p) + p->ProtocolDataOffset;
-    auto le128 = [](const BYTE* x) -> unsigned long long {
-        unsigned long long v = 0; for (int i=7;i>=0;--i) v=(v<<8)|x[i]; return v;
+    auto le128Decimal = [](const BYTE* x) -> std::wstring {
+        // Convert an unsigned 128-bit little-endian integer without compiler-specific
+        // __int128 support (MSVC does not provide that type).
+        std::wstring decimal = L"0";
+        for (int i = 15; i >= 0; --i) {
+            unsigned carry = x[i];
+            for (auto it = decimal.rbegin(); it != decimal.rend(); ++it) {
+                const unsigned value = unsigned(*it - L'0') * 256u + carry;
+                *it = wchar_t(L'0' + (value % 10u));
+                carry = value / 10u;
+            }
+            while (carry) {
+                decimal.insert(decimal.begin(), wchar_t(L'0' + (carry % 10u)));
+                carry /= 10u;
+            }
+        }
+        const auto nonzero = decimal.find_first_not_of(L'0');
+        return nonzero == std::wstring::npos ? L"0" : decimal.substr(nonzero);
     };
     unsigned short kelvin = (unsigned short)(d[1] | (d[2] << 8));
     r.temperatureC = kelvin ? (double)kelvin - 273.15 : 0;
     r.spare = d[3]; r.used = d[5];
-    r.dataUnitsWritten = le128(d + 48);
-    r.powerCycles = le128(d + 112);
-    r.powerOnHours = le128(d + 128);
-    r.unsafeShutdowns = le128(d + 144);
-    r.mediaErrors = le128(d + 160);
+    r.dataUnitsWritten = le128Decimal(d + 48);
+    r.powerCycles = le128Decimal(d + 112);
+    r.powerOnHours = le128Decimal(d + 128);
+    r.unsafeShutdowns = le128Decimal(d + 144);
+    r.mediaErrors = le128Decimal(d + 160);
     r.ok = true;
     return r;
 }
@@ -289,6 +307,14 @@ static std::vector<SmartctlDevice> SmartctlDevices() {
     const std::wstring scan = RunCapture(L"\"" + g_smartctl + L"\" --scan-open", 30000);
     std::wistringstream lines(scan);
     std::wstring line;
+    auto safeSmartctlToken = [](const std::wstring& token) {
+        if (token.empty() || token.size() > 128) return false;
+        return std::all_of(token.begin(), token.end(), [](wchar_t c) {
+            return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') ||
+                   (c >= L'0' && c <= L'9') || c == L'_' || c == L'-' ||
+                   c == L'.' || c == L',' || c == L':' || c == L'/';
+        });
+    };
     while (std::getline(lines, line)) {
         const auto first = line.find_first_not_of(L" \t\r");
         if (first == std::wstring::npos || line[first] != L'/') continue;
@@ -296,9 +322,15 @@ static std::vector<SmartctlDevice> SmartctlDevices() {
         const std::wstring data = line.substr(first, comment == std::wstring::npos ? comment : comment-first);
         std::wistringstream tokens(data);
         SmartctlDevice item;
-        if (!(tokens >> item.path) || item.path.rfind(L"/dev/", 0) != 0) continue;
+        if (!(tokens >> item.path) || item.path.rfind(L"/dev/", 0) != 0 ||
+            !safeSmartctlToken(item.path)) continue;
         std::wstring token;
-        while (tokens >> token) item.options += L" " + token;
+        bool validOptions = true;
+        while (tokens >> token) {
+            if (!safeSmartctlToken(token)) { validOptions = false; break; }
+            item.options += L" " + token;
+        }
+        if (!validOptions) continue;
         auto it = std::find_if(devices.begin(), devices.end(), [&](const SmartctlDevice& d) { return d.path == item.path; });
         if (it == devices.end()) devices.push_back(std::move(item));
         else if (it->options.empty()) it->options = item.options;
@@ -387,7 +419,34 @@ static std::wstring TbwReport() {
         std::wofstream pf(profile);
         if (pf) pf << L"disk_number,rated_tbw_TB\r\n0,600\r\n";
     }
-    struct Snap { long long epoch; unsigned long long units; };
+    struct Snap { long long epoch; std::wstring units; };
+    auto normalizeDecimal = [](const std::wstring& value, std::wstring& result) -> bool {
+        if (value.empty()) return false;
+        for (wchar_t ch : value) if (ch < L'0' || ch > L'9') return false;
+        const auto first = value.find_first_not_of(L'0');
+        result = first == std::wstring::npos ? L"0" : value.substr(first);
+        return true;
+    };
+    auto decimalToLongDouble = [](const std::wstring& value) -> long double {
+        long double parsed = 0;
+        for (wchar_t ch : value) parsed = parsed * 10.0L + static_cast<unsigned>(ch - L'0');
+        return parsed;
+    };
+    auto subtractDecimal = [](const std::wstring& larger, const std::wstring& smaller) -> std::wstring {
+        std::wstring result(larger);
+        int borrow = 0;
+        size_t i = larger.size(), j = smaller.size();
+        while (i > 0) {
+            --i;
+            int digit = (larger[i] - L'0') - borrow;
+            if (j > 0) digit -= (smaller[--j] - L'0');
+            borrow = digit < 0 ? 1 : 0;
+            if (borrow) digit += 10;
+            result[i] = static_cast<wchar_t>(L'0' + digit);
+        }
+        const auto first = result.find_first_not_of(L'0');
+        return first == std::wstring::npos ? L"0" : result.substr(first);
+    };
     std::map<unsigned, std::vector<Snap>> snapshots;
     std::wifstream in(history);
     std::wstring line;
@@ -399,9 +458,10 @@ static std::wstring TbwReport() {
             !std::getline(row, unitsText, L',') || !std::getline(row, hoursText, L',') ||
             !std::getline(row, usedText, L',')) continue;
         int y=0, mo=0, d=0, hh=0, mm=0, sec=0;
-        unsigned disk=0; unsigned long long units=0;
+        unsigned disk=0; std::wstring units;
         if (swscanf_s(stamp.c_str(), L"%d-%d-%d %d:%d:%d", &y,&mo,&d,&hh,&mm,&sec) != 6) continue;
-        try { disk=(unsigned)std::stoul(diskText); units=std::stoull(unitsText); } catch (...) { continue; }
+        try { disk=(unsigned)std::stoul(diskText); } catch (...) { continue; }
+        if (!normalizeDecimal(unitsText, units)) continue;
         std::tm tm{}; tm.tm_year=y-1900; tm.tm_mon=mo-1; tm.tm_mday=d;
         tm.tm_hour=hh; tm.tm_min=mm; tm.tm_sec=sec;
         snapshots[disk].push_back({(long long)_mkgmtime(&tm), units});
@@ -423,14 +483,17 @@ static std::wstring TbwReport() {
         if (v.empty()) continue;
         std::sort(v.begin(), v.end(), [](const Snap& a, const Snap& b){ return a.epoch < b.epoch; });
         const auto& first = v.front(); const auto& last = v.back();
-        const double totalTB = last.units * 512000.0 / 1e12;
+        const double totalTB = static_cast<double>(decimalToLongDouble(last.units) * 512000.0L / 1.0e12L);
         ss << L"\r\nPhysicalDrive" << item.first << L": накопленная запись ≈ "
            << std::fixed << std::setprecision(3) << totalTB << L" TB.";
-        if (v.size() < 2 || last.epoch <= first.epoch || last.units < first.units) {
+        if (v.size() < 2 || last.epoch <= first.epoch ||
+            last.units.size() < first.units.size() ||
+            (last.units.size() == first.units.size() && last.units < first.units)) {
             ss << L" Для расчёта темпа нужны два корректных снимка.\r\n"; continue;
         }
         const double days = (last.epoch - first.epoch) / 86400.0;
-        const double writtenTB = (last.units - first.units) * 512000.0 / 1e12;
+        const std::wstring writtenUnits = subtractDecimal(last.units, first.units);
+        const double writtenTB = static_cast<double>(decimalToLongDouble(writtenUnits) * 512000.0L / 1.0e12L);
         const double perDay = writtenTB / days;
         ss << L"\r\nПериод наблюдения: " << days << L" дней; запись за период: "
            << writtenTB << L" TB; средний темп: " << perDay << L" TB/день.";
@@ -642,7 +705,7 @@ static void StartTask(const std::wstring& name, std::function<std::wstring()> fn
 static void AddButton(HWND parent, const wchar_t* label, int id, int x, int y, int w=150) {
     CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,x,y,w,30,parent,(HMENU)(INT_PTR)id,g_instance,nullptr);
 }
-enum { ID_HARDWARE=100, ID_SMART, ID_TEST_SHORT, ID_TEST_LONG, ID_TEST_CANCEL, ID_DISKS, ID_DIAG, ID_PROCESSES,
+enum { ID_HARDWARE=100, ID_SMART, ID_TEST_STATUS, ID_TEST_SHORT, ID_TEST_LONG, ID_DISKS, ID_DIAG, ID_PROCESSES,
        ID_STARTUP, ID_RAM, ID_TBW, ID_TEMP, ID_BENCH, ID_SAVE, ID_CANCEL_TEST };
 static void SaveReport() {
     wchar_t file[MAX_PATH]=L"PC_Performance_Report.txt";
@@ -660,9 +723,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         AddButton(hwnd,L"Оборудование",ID_HARDWARE,10,10);
         AddButton(hwnd,L"SMART / NVMe",ID_SMART,168,10);
         AddButton(hwnd,L"Диски",ID_DISKS,326,10);
-        AddButton(hwnd,L"Self-test статус",ID_TEST_SHORT,484,10);
-        AddButton(hwnd,L"Self-test SHORT",ID_TEST_LONG,642,10);
-        AddButton(hwnd,L"Self-test LONG",ID_TEST_CANCEL,800,10);
+        AddButton(hwnd,L"Self-test статус",ID_TEST_STATUS,484,10);
+        AddButton(hwnd,L"Self-test SHORT",ID_TEST_SHORT,642,10);
+        AddButton(hwnd,L"Self-test LONG",ID_TEST_LONG,800,10);
         AddButton(hwnd,L"Отмена теста",ID_CANCEL_TEST,958,10);
         AddButton(hwnd,L"WHEA / RAM events",ID_DIAG,10,48);
         AddButton(hwnd,L"Процессы",ID_PROCESSES,168,48);
@@ -688,13 +751,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case ID_HARDWARE: StartTask(L"Оборудование",HardwareReport); break;
         case ID_SMART: StartTask(L"SMART и NVMe",SmartReport); break;
         case ID_DISKS: StartTask(L"Список накопителей",DiskList); break;
-        case ID_TEST_SHORT: StartTask(L"Статус SMART self-test",SmartTests); break;
-        case ID_TEST_LONG: {
+        case ID_TEST_STATUS: StartTask(L"Статус SMART self-test",SmartTests); break;
+        case ID_TEST_SHORT: {
             if(MessageBoxW(hwnd,L"Запустить короткий SMART-тест на всех обнаруженных smartctl дисках? Команда зависит от поддержки накопителя.",L"Подтверждение",MB_YESNO|MB_ICONQUESTION)==IDYES)
                 StartTask(L"SMART SHORT",[] { return RunSmartTest(L"-t short"); });
             break;
         }
-        case ID_TEST_CANCEL: {
+        case ID_TEST_LONG: {
             if(MessageBoxW(hwnd,L"Запустить длительный SMART-тест на всех обнаруженных smartctl дисках?",L"Подтверждение",MB_YESNO|MB_ICONWARNING)==IDYES)
                 StartTask(L"SMART LONG",[] { return RunSmartTest(L"-t long"); });
             break;
@@ -740,7 +803,7 @@ int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int nCmdShow) {
     WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=hInst; wc.lpszClassName=L"PCPM_CPP_X64";
     wc.hCursor=LoadCursor(nullptr,IDC_ARROW); wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
     RegisterClassW(&wc);
-    HWND hwnd=CreateWindowW(wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.3.5",
+    HWND hwnd=CreateWindowW(wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.3.7",
         WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,1160,790,nullptr,nullptr,hInst,nullptr);
     if(!hwnd) return 1;
     ShowWindow(hwnd,nCmdShow); UpdateWindow(hwnd);

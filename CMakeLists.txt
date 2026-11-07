@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(PC_Performance_Monitor_CPP_x64 VERSION 1.3.5 LANGUAGES CXX)
+project(PC_Performance_Monitor_CPP_x64 VERSION 1.3.7 LANGUAGES CXX)
 
 if(NOT WIN32)
   message(FATAL_ERROR "This project is Windows-only.")
