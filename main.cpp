@@ -102,6 +102,52 @@ static std::wstring Timestamp() {
         t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond);
     return b;
 }
+
+static std::wstring g_sessionLogPath;
+static std::mutex g_sessionMutex;
+static std::map<DWORD,std::wstring> g_lastProcesses;
+static unsigned g_sessionSnapshotCounter = 0;
+static void SessionLog(const std::wstring& message) {
+    if (g_sessionLogPath.empty()) return;
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    std::wofstream f(g_sessionLogPath, std::ios::app);
+    if (f) f << Timestamp() << L" | " << message << L"\r\n";
+}
+static void BeginSessionLog() {
+    wchar_t temp[MAX_PATH]{};
+    if (!GetTempPathW(MAX_PATH, temp)) return;
+    g_sessionLogPath = std::wstring(temp) + L"PCPM_session_" + std::to_wstring(GetCurrentProcessId()) + L".log";
+    DeleteFileW(g_sessionLogPath.c_str());
+    SessionLog(L"SESSION_START");
+    SessionLog(L"APP_PID | " + std::to_wstring(GetCurrentProcessId()));
+}
+static void CaptureProcessActivity() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) { SessionLog(L"PROCESS_SCAN_ERROR | " + std::to_wstring(GetLastError())); return; }
+    std::map<DWORD,std::wstring> current;
+    PROCESSENTRY32W pe{}; pe.dwSize = sizeof(pe);
+    if (Process32FirstW(snap, &pe)) do { current.emplace(pe.th32ProcessID, pe.szExeFile); } while (Process32NextW(snap, &pe));
+    CloseHandle(snap);
+    for (const auto& item : current) if (g_lastProcesses.find(item.first) == g_lastProcesses.end())
+        SessionLog(L"PROCESS_START | PID=" + std::to_wstring(item.first) + L" | " + item.second);
+    for (const auto& item : g_lastProcesses) if (current.find(item.first) == current.end())
+        SessionLog(L"PROCESS_EXIT | PID=" + std::to_wstring(item.first) + L" | " + item.second);
+    g_lastProcesses.swap(current);
+    if (++g_sessionSnapshotCounter % 5 == 0) {
+        MEMORYSTATUSEX m{}; m.dwLength = sizeof(m);
+        if (GlobalMemoryStatusEx(&m)) SessionLog(L"PROCESS_SNAPSHOT | running=" + std::to_wstring(g_lastProcesses.size()) + L" | RAM_load=" + std::to_wstring(m.dwMemoryLoad) + L"%");
+    }
+}
+static void EndSessionLog() {
+    SessionLog(L"SESSION_END");
+    if (!g_sessionLogPath.empty()) {
+        std::lock_guard<std::mutex> lock(g_sessionMutex);
+        DeleteFileW(g_sessionLogPath.c_str());
+        g_sessionLogPath.clear();
+    }
+    g_lastProcesses.clear();
+}
+
 static std::wstring RunCapture(const std::wstring& command, DWORD timeoutMs = 120000) {
     SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
     HANDLE readPipe{}, writePipe{};
@@ -987,6 +1033,7 @@ static void ShowResult(std::wstring* p) {
 }
 static void StartTask(const std::wstring& name, std::function<std::wstring()> fn) {
     if (g_closing || !g_window) return;
+    SessionLog(L"TASK_STARTED | " + name);
     SetStatus(L"Выполняется: " + name);
     EnableWindow(g_window, FALSE);
     ++g_activeTasks;
@@ -996,6 +1043,12 @@ static void StartTask(const std::wstring& name, std::function<std::wstring()> fn
         try { body = fn(); }
         catch (const std::exception& e) { body = L"Ошибка фоновой задачи (std::exception)."; }
         catch (...) { body = L"Неизвестная ошибка фоновой задачи."; }
+        SessionLog(L"TASK_FINISHED | " + name);
+        {
+            std::lock_guard<std::mutex> lock(g_sessionMutex);
+            std::wofstream log(g_sessionLogPath, std::ios::app);
+            if (log) log << L"TASK_OUTPUT_BEGIN | " << name << L"\r\n" << body << L"\r\n";
+        }
         auto* result = new std::wstring(L"[" + name + L"]\r\n" + Timestamp() + L"\r\n\r\n" + body);
         // WM_CLOSE is deferred until all workers report completion, so target remains valid.
         if (!PostMessageW(target, WM_APP_RESULT, 0, (LPARAM)result)) {
@@ -1052,6 +1105,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch(msg) {
     case WM_CREATE: {
         g_window=hwnd;
+        SetTimer(hwnd, 1, 2000, nullptr);
+        SessionLog(L"MAIN_WINDOW_CREATED");
+        CaptureProcessActivity();
         AddButton(hwnd,L"Оборудование",ID_HARDWARE,10,10);
         AddButton(hwnd,L"SMART / NVMe",ID_SMART,168,10);
         AddButton(hwnd,L"Диски",ID_DISKS,326,10);
@@ -1095,6 +1151,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if(g_status) MoveWindow(g_status,10,HIWORD(lp)-28,LOWORD(lp)-20,22,TRUE);
         return 0;
     }
+    case WM_TIMER:
+        if (wp == 1 && !g_closing) CaptureProcessActivity();
+        return 0;
     case WM_COMMAND:
         switch(LOWORD(wp)) {
         case ID_HARDWARE: StartTask(L"Оборудование",HardwareReport); break;
@@ -1141,7 +1200,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         DestroyWindow(hwnd);
         return 0;
-    case WM_DESTROY: PostQuitMessage(0); return 0;
+    case WM_DESTROY:
+        KillTimer(hwnd, 1);
+        SessionLog(L"MAIN_WINDOW_DESTROYED");
+        EndSessionLog();
+        PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(hwnd,msg,wp,lp);
 }
@@ -1151,7 +1214,7 @@ static void StartupLog(const wchar_t* stage, DWORD errorCode=0) {
     if(f) f<<Timestamp()<<L" | "<<stage<<L" | GetLastError="<<errorCode<<L"\r\n";
 }
 int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int) {
-    g_instance=hInst; StartupLog(L"process started");
+    g_instance=hInst; BeginSessionLog(); SessionLog(L"PROCESS_STARTED"); StartupLog(L"process started");
     INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_STANDARD_CLASSES|ICC_LISTVIEW_CLASSES};
     if(!InitCommonControlsEx(&ic)) StartupLog(L"InitCommonControlsEx failed",GetLastError());
     WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=hInst; wc.lpszClassName=L"PCPM_CPP_X64";
