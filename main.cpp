@@ -619,16 +619,15 @@ static std::wstring ProcessFileDescription(DWORD pid, const wchar_t* fallback) {
     if(!GetFileVersionInfoW(path.c_str(),0,bytes,data.data())) return L"Приложение: "+std::wstring(fallback);
     struct LANGANDCODEPAGE { WORD language, codepage; };
     LANGANDCODEPAGE* translations=nullptr; UINT count=0;
-    if(!VerQueryValueW(data.data(),L"\\\\VarFileInfo\\\\Translation",(LPVOID*)&translations,&count)||count<sizeof(LANGANDCODEPAGE))
+    if(!VerQueryValueW(data.data(),L"\\VarFileInfo\\Translation",(LPVOID*)&translations,&count)||count<sizeof(LANGANDCODEPAGE))
         return L"Приложение: "+std::wstring(fallback);
     wchar_t query[128]{};
-    swprintf_s(query,L"\\\\StringFileInfo\\\\%04x%04x\\\\FileDescription",translations[0].language,translations[0].codepage);
+    swprintf_s(query,L"\\StringFileInfo\\%04x%04x\\FileDescription",translations[0].language,translations[0].codepage);
     wchar_t* value=nullptr; UINT length=0;
     if(VerQueryValueW(data.data(),query,(LPVOID*)&value,&length)&&value&&length) return value;
     return L"Приложение: "+std::wstring(fallback);
 }
 static std::vector<ProcessRow> EnumerateProcessRows() {
-    struct CpuSample { ULONGLONG time{}; };
     auto processTime=[](DWORD pid, ULONGLONG& value)->bool {
         HANDLE p=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
         if(!p) return false;
@@ -1113,7 +1112,7 @@ static void StartupLog(const wchar_t* stage, DWORD errorCode=0) {
 }
 int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int) {
     g_instance=hInst; StartupLog(L"process started");
-    INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_STANDARD_CLASSES};
+    INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_STANDARD_CLASSES|ICC_LISTVIEW_CLASSES};
     if(!InitCommonControlsEx(&ic)) StartupLog(L"InitCommonControlsEx failed",GetLastError());
     WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=hInst; wc.lpszClassName=L"PCPM_CPP_X64";
     wc.hCursor=LoadCursor(nullptr,IDC_ARROW); wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
