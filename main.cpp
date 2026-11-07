@@ -1,14 +1,23 @@
+#ifndef UNICODE
 #define UNICODE
+#endif
+#ifndef _UNICODE
 #define _UNICODE
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
 #include <psapi.h>
-#include <ntddstor.h>
 #include <knownfolders.h>
 #include <tlhelp32.h>
 #include <winioctl.h>
+#include <ntddstor.h>
 #include <ntdddisk.h>
 #include <evntrace.h>
 #include <winevt.h>
