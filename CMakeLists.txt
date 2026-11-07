@@ -16,5 +16,5 @@ target_link_libraries(PC_Performance_Monitor_x64 PRIVATE
   Comctl32 Comdlg32 Wbemuuid Wevtapi Advapi32 Shell32 Ole32 OleAut32 Psapi)
 if(MSVC)
   target_compile_options(PC_Performance_Monitor_x64 PRIVATE /W4 /permissive- /EHsc /utf-8)
-  target_link_options(PC_Performance_Monitor_x64 PRIVATE /MACHINE:X64)
+  target_link_options(PC_Performance_Monitor_x64 PRIVATE /MACHINE:X64 "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
 endif()
