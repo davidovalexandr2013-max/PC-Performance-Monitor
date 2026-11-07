@@ -551,7 +551,7 @@ static std::wstring TbwReport() {
         try { rated[(unsigned)std::stoul(ds)] = std::stod(tbw); } catch (...) {}
     }
     std::wstringstream ss;
-    ss << L"=== История записи и оценка TBW ===\r\nИстория: " << history
+    ss << L"=== Ресурс SSD: история объёма записи ===\r\nИстория: " << history
        << L"\r\nПрофиль ресурса: " << profile
        << L"\r\nNVMe Data Units Written: одна единица = 512 000 байт.\r\n";
     for (auto& item : snapshots) {
@@ -774,7 +774,7 @@ static std::vector<ProcessRow> EnumerateProcessRows() {
         rows.push_back(std::move(row));
     } while(Process32NextW(snap,&pe));
     CloseHandle(snap);
-    std::sort(rows.begin(),rows.end(),[](const ProcessRow&a,const ProcessRow&b){return a.cpuPercent>b.cpuPercent;});
+    std::sort(rows.begin(),rows.end(),[](const ProcessRow&a,const ProcessRow&b){return a.workingSet>b.workingSet;});
     return rows;
 }
 static HWND g_processManager{},g_processList{};
@@ -784,7 +784,7 @@ static void RefreshProcessList() {
     auto rows=EnumerateProcessRows();
     for(const auto& p:rows) {
         wchar_t pid[32]{},cpu[32]{},mem[64]{};
-        swprintf_s(pid,L"%lu",p.pid); swprintf_s(cpu,L"%.1f%%",p.cpuPercent);
+        swprintf_s(pid,L"%lu (%s)",p.pid,p.name.c_str()); swprintf_s(cpu,L"%.1f%%",p.cpuPercent);
         swprintf_s(mem,L"%.1f МБ",p.workingSet/1048576.0);
         LVITEMW item{}; item.mask=LVIF_TEXT|LVIF_PARAM; item.iItem=(int)SendMessageW(g_processList,LVM_GETITEMCOUNT,0,0);
         item.pszText=pid; item.lParam=(LPARAM)p.pid;
@@ -813,17 +813,17 @@ static LRESULT CALLBACK ProcessManagerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM l
     switch(msg) {
     case WM_CREATE: {
         g_processManager=hwnd;
-        g_processList=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,10,10,1180,560,hwnd,(HMENU)5201,g_instance,nullptr);
+        g_processList=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,10,10,1180,540,hwnd,(HMENU)5201,g_instance,nullptr);
         ListView_SetExtendedListViewStyle(g_processList,LVS_EX_FULLROWSELECT|LVS_EX_GRIDLINES|LVS_EX_DOUBLEBUFFER);
-        const wchar_t* titles[]={L"PID",L"CPU",L"ОЗУ",L"Процесс",L"Описание / назначение"};
+        const wchar_t* titles[]={L"PID (программа)",L"CPU",L"ОЗУ",L"Процесс",L"Описание / назначение"};
         const int widths[]={80,80,100,220,650};
         for(int i=0;i<5;++i) { LVCOLUMNW c{}; c.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_SUBITEM; c.pszText=const_cast<LPWSTR>(titles[i]); c.cx=widths[i]; c.iSubItem=i; ListView_InsertColumn(g_processList,i,&c); }
-        CreateWindowW(L"BUTTON",L"Завершить процесс",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,10,582,190,34,hwnd,(HMENU)5202,g_instance,nullptr);
-        CreateWindowW(L"BUTTON",L"Обновить список",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,210,582,150,34,hwnd,(HMENU)5203,g_instance,nullptr);
-        CreateWindowW(L"STATIC",L"CPU — доля общей мощности процессора за интервал 0,5 с; ОЗУ — текущая рабочая память процесса.",WS_CHILD|WS_VISIBLE,380,588,800,24,hwnd,(HMENU)5204,g_instance,nullptr);
+        CreateWindowW(L"BUTTON",L"Завершить процесс",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,10,620,190,34,hwnd,(HMENU)5202,g_instance,nullptr);
+        CreateWindowW(L"BUTTON",L"Обновить список",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,210,620,150,34,hwnd,(HMENU)5203,g_instance,nullptr);
+        CreateWindowW(L"STATIC",L"CPU — доля общей мощности процессора за интервал 0,5 с; ОЗУ — текущая рабочая память процесса.",WS_CHILD|WS_VISIBLE,380,626,800,24,hwnd,(HMENU)5204,g_instance,nullptr);
         RefreshProcessList(); return 0;
     }
-    case WM_SIZE: if(g_processList) MoveWindow(g_processList,10,10,LOWORD(lp)-20,HIWORD(lp)-70,TRUE); return 0;
+    case WM_SIZE: if(g_processList) MoveWindow(g_processList,10,10,LOWORD(lp)-20,HIWORD(lp)-110,TRUE); return 0;
     case WM_COMMAND:
         if(LOWORD(wp)==5202) { TerminateSelectedProcess(hwnd); return 0; }
         if(LOWORD(wp)==5203) { RefreshProcessList(); return 0; }
@@ -1037,8 +1037,12 @@ static std::wstring TempScan() {
         }
     }
     std::wstringstream ss; ss << L"=== Временные файлы (только анализ) ===\r\nКаталогов: " << dirs.size()
-        << L"\r\nФайлов: " << files << L"\r\nОбъём: " << (bytes/1048576.0) << L" MiB\r\nОшибок доступа: " << errors
-        << L"\r\nУдаление не выполняется. Это защищает открытые и нужные приложениям файлы.\r\n";
+        << L"\r\nФайлов: " << files << L"\r\nОбщий объём: " << std::fixed << std::setprecision(1) << (bytes/1048576.0) << L" МБ (" << (bytes/1073741824.0) << L" ГБ)"
+        << L"\r\nОшибок доступа: " << errors << L"\r\n\r\nФайлы (первые 100):\r\n";
+    unsigned shown=0;
+    for(const auto& d:dirs) { std::error_code ec; for(fs::recursive_directory_iterator it(d,fs::directory_options::skip_permission_denied,ec),end;it!=end&&shown<100;it.increment(ec)) { if(ec){ec.clear();continue;} if(!it->is_regular_file(ec)){ec.clear();continue;} auto sz=it->file_size(ec); if(ec){ec.clear();continue;} ss << it->path().wstring() << L" — " << std::fixed << std::setprecision(2) << (sz/1048576.0) << L" МБ\r\n"; ++shown; } if(shown>=100) break; }
+    if(files>shown) ss << L"... Ещё " << (files-shown) << L" файлов не показано.\r\n";
+    ss << L"\r\nУдаление не выполняется: файлы могут использоваться программами.\r\n";
     return ss.str();
 }
 
@@ -1117,7 +1121,7 @@ static void AddButton(HWND parent, const wchar_t* label, int id, int x, int y, i
     CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,x,y,w,32,parent,(HMENU)(INT_PTR)id,g_instance,nullptr);
 }
 enum { ID_HARDWARE=100, ID_SMART, ID_TEST_STATUS, ID_TEST_SHORT, ID_TEST_LONG, ID_DISKS, ID_DIAG, ID_PROCESSES,
-       ID_STARTUP, ID_RAM, ID_TBW, ID_TEMP, ID_BENCH, ID_SAVE, ID_CANCEL_TEST, ID_AD_BANNER };
+       ID_STARTUP, ID_RAM, ID_TBW, ID_TEMP, ID_BENCH, ID_SAVE, ID_CANCEL_TEST, ID_AD_BANNER, ID_SERVICES };
 static COLORREF ButtonColor(int id) {
     switch(id) {
     case ID_HARDWARE: case ID_SMART: case ID_DISKS: return RGB(18,145,190);
@@ -1207,18 +1211,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         AddButton(hwnd,L"Оборудование",ID_HARDWARE,10,10);
         AddButton(hwnd,L"SMART / NVMe",ID_SMART,168,10);
         AddButton(hwnd,L"Диски",ID_DISKS,326,10);
-        AddButton(hwnd,L"Self-test статус",ID_TEST_STATUS,484,10);
-        AddButton(hwnd,L"Self-test SHORT",ID_TEST_SHORT,642,10);
-        AddButton(hwnd,L"Self-test LONG",ID_TEST_LONG,800,10);
+        AddButton(hwnd,L"Статус проверки дисков",ID_TEST_STATUS,484,10);
+        AddButton(hwnd,L"Быстрая проверка диска",ID_TEST_SHORT,642,10);
+        AddButton(hwnd,L"Полная проверка диска",ID_TEST_LONG,800,10);
         AddButton(hwnd,L"Отмена теста",ID_CANCEL_TEST,958,10);
-        AddButton(hwnd,L"WHEA / RAM events",ID_DIAG,10,48);
+        AddButton(hwnd,L"Аппаратные ошибки",ID_DIAG,10,48);
         AddButton(hwnd,L"Процессы",ID_PROCESSES,168,48);
         AddButton(hwnd,L"Автозагрузка",ID_STARTUP,326,48);
-        AddButton(hwnd,L"Индекс RAM",ID_RAM,484,48);
-        AddButton(hwnd,L"TBW / история",ID_TBW,642,48);
+        AddButton(hwnd,L"Состояние ОЗУ",ID_RAM,484,48);
+        AddButton(hwnd,L"Ресурс SSD",ID_TBW,642,48);
         AddButton(hwnd,L"Временные файлы",ID_TEMP,800,48);
         AddButton(hwnd,L"Тест записи",ID_BENCH,958,48);
-        AddButton(hwnd,L"Сохранить отчёт",ID_SAVE,10,86);
+        AddButton(hwnd,L"Службы Windows",ID_SERVICES,10,86); AddButton(hwnd,L"Сохранить отчёт",ID_SAVE,168,86);
         PCPMAds::InitGraphics();
         PCPMAds::Refresh();
         AddButton(hwnd,PCPMAds::Label().c_str(),ID_AD_BANNER,10,126,1110);
@@ -1281,6 +1285,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case ID_TBW: StartTask(L"История TBW",TbwReport); break;
         case ID_TEMP: StartTask(L"Анализ временных файлов",TempScan); break;
         case ID_BENCH: if(MessageBoxW(hwnd,L"Выполнить запись тестового файла 128 MiB на системный временный каталог? Данные теста будут удалены.",L"Подтверждение",MB_YESNO|MB_ICONWARNING)==IDYES) StartTask(L"Тест записи",Benchmark); break;
+        case ID_SERVICES: StartTask(L"Службы Windows",ServicesReport); break;
         case ID_SAVE: StartTask(L"Формирование и сохранение полного отчёта",SaveFullReport); break;
         case ID_AD_BANNER: if(!PCPMAds::Open()) MessageBoxW(hwnd,L"Нет активной рекламы. Запустите PC_Performance_Monitor_AdServer_x64.exe и откройте http://127.0.0.1:8765/admin",L"Реклама",MB_OK|MB_ICONINFORMATION); break;
         }
