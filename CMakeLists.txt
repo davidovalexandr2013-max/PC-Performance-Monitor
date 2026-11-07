@@ -13,7 +13,7 @@ set_target_properties(PC_Performance_Monitor_x64 PROPERTIES OUTPUT_NAME "PC_Perf
 target_compile_features(PC_Performance_Monitor_x64 PRIVATE cxx_std_17)
 target_compile_definitions(PC_Performance_Monitor_x64 PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
 target_link_libraries(PC_Performance_Monitor_x64 PRIVATE
-  Comctl32 Comdlg32 Wbemuuid Wevtapi Advapi32 Shell32 Ole32 OleAut32 Psapi)
+  Comctl32 Comdlg32 Wbemuuid Wevtapi Advapi32 Shell32 Ole32 OleAut32 Psapi Version)
 if(MSVC)
   target_compile_options(PC_Performance_Monitor_x64 PRIVATE /W4 /permissive- /EHsc /utf-8)
   target_link_options(PC_Performance_Monitor_x64 PRIVATE /MACHINE:X64 "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
