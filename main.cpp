@@ -16,6 +16,7 @@
 #include <psapi.h>
 #include <knownfolders.h>
 #include <tlhelp32.h>
+#include <winver.h>
 #include <winioctl.h>
 #include <ntddstor.h>
 #include <ntdddisk.h>
@@ -598,18 +599,146 @@ static std::wstring DiagnosticsReport() {
         EventReport(L"Microsoft-Windows-MemoryDiagnostics-Results/Operational", L"Windows Memory Diagnostics");
 }
 
+struct ProcessRow {
+    DWORD pid{};
+    double cpuPercent{};
+    SIZE_T workingSet{};
+    std::wstring name, description;
+};
+static std::wstring ProcessFileDescription(DWORD pid, const wchar_t* fallback) {
+    HANDLE p=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
+    if(!p) return L"Описание недоступно (нет доступа)";
+    std::wstring path(32768,L'\0'); DWORD n=(DWORD)path.size();
+    bool ok=QueryFullProcessImageNameW(p,0,path.data(),&n)!=FALSE;
+    CloseHandle(p);
+    if(!ok) return L"Системный процесс Windows";
+    path.resize(n);
+    DWORD handle=0, bytes=GetFileVersionInfoSizeW(path.c_str(),&handle);
+    if(!bytes) return L"Приложение: "+std::wstring(fallback);
+    std::vector<BYTE> data(bytes);
+    if(!GetFileVersionInfoW(path.c_str(),0,bytes,data.data())) return L"Приложение: "+std::wstring(fallback);
+    struct LANGANDCODEPAGE { WORD language, codepage; };
+    LANGANDCODEPAGE* translations=nullptr; UINT count=0;
+    if(!VerQueryValueW(data.data(),L"\\\\VarFileInfo\\\\Translation",(LPVOID*)&translations,&count)||count<sizeof(LANGANDCODEPAGE))
+        return L"Приложение: "+std::wstring(fallback);
+    wchar_t query[128]{};
+    swprintf_s(query,L"\\\\StringFileInfo\\\\%04x%04x\\\\FileDescription",translations[0].language,translations[0].codepage);
+    wchar_t* value=nullptr; UINT length=0;
+    if(VerQueryValueW(data.data(),query,(LPVOID*)&value,&length)&&value&&length) return value;
+    return L"Приложение: "+std::wstring(fallback);
+}
+static std::vector<ProcessRow> EnumerateProcessRows() {
+    struct CpuSample { ULONGLONG time{}; };
+    auto processTime=[](DWORD pid, ULONGLONG& value)->bool {
+        HANDLE p=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
+        if(!p) return false;
+        FILETIME c{},e{},k{},u{}; bool ok=GetProcessTimes(p,&c,&e,&k,&u)!=FALSE; CloseHandle(p);
+        if(ok) value=((ULONGLONG)k.dwHighDateTime<<32|k.dwLowDateTime)+((ULONGLONG)u.dwHighDateTime<<32|u.dwLowDateTime);
+        return ok;
+    };
+    auto systemTime=[](ULONGLONG& value)->bool {
+        FILETIME idle{},kernel{},user{};
+        if(!GetSystemTimes(&idle,&kernel,&user)) return false;
+        value=((ULONGLONG)kernel.dwHighDateTime<<32|kernel.dwLowDateTime)+((ULONGLONG)user.dwHighDateTime<<32|user.dwLowDateTime);
+        return true;
+    };
+    std::map<DWORD,ULONGLONG> before;
+    HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+    if(snap==INVALID_HANDLE_VALUE) return {};
+    PROCESSENTRY32W pe{}; pe.dwSize=sizeof(pe);
+    if(Process32FirstW(snap,&pe)) do { ULONGLONG t=0; if(processTime(pe.th32ProcessID,t)) before[pe.th32ProcessID]=t; } while(Process32NextW(snap,&pe));
+    CloseHandle(snap);
+    ULONGLONG sysBefore=0,sysAfter=0; systemTime(sysBefore);
+    Sleep(500);
+    systemTime(sysAfter);
+    std::vector<ProcessRow> rows;
+    snap=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+    if(snap==INVALID_HANDLE_VALUE) return rows;
+    pe={}; pe.dwSize=sizeof(pe);
+    const ULONGLONG systemDelta=sysAfter>sysBefore?sysAfter-sysBefore:0;
+    if(Process32FirstW(snap,&pe)) do {
+        ProcessRow row; row.pid=pe.th32ProcessID; row.name=pe.szExeFile;
+        ULONGLONG after=0;
+        if(systemDelta && processTime(row.pid,after)) {
+            auto it=before.find(row.pid);
+            if(it!=before.end()&&after>=it->second) row.cpuPercent=100.0*(double)(after-it->second)/(double)systemDelta;
+        }
+        HANDLE p=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|PROCESS_VM_READ,FALSE,row.pid);
+        if(p) { PROCESS_MEMORY_COUNTERS_EX pm{}; pm.cb=sizeof(pm); if(GetProcessMemoryInfo(p,(PROCESS_MEMORY_COUNTERS*)&pm,sizeof(pm))) row.workingSet=pm.WorkingSetSize; CloseHandle(p); }
+        row.description=ProcessFileDescription(row.pid,row.name.c_str());
+        rows.push_back(std::move(row));
+    } while(Process32NextW(snap,&pe));
+    CloseHandle(snap);
+    std::sort(rows.begin(),rows.end(),[](const ProcessRow&a,const ProcessRow&b){return a.cpuPercent>b.cpuPercent;});
+    return rows;
+}
+static HWND g_processManager{},g_processList{};
+static void RefreshProcessList() {
+    if(!g_processList) return;
+    SendMessageW(g_processList,LVM_DELETEALLITEMS,0,0);
+    auto rows=EnumerateProcessRows();
+    for(const auto& p:rows) {
+        wchar_t pid[32]{},cpu[32]{},mem[64]{};
+        swprintf_s(pid,L"%lu",p.pid); swprintf_s(cpu,L"%.1f%%",p.cpuPercent);
+        swprintf_s(mem,L"%.1f МБ",p.workingSet/1048576.0);
+        LVITEMW item{}; item.mask=LVIF_TEXT|LVIF_PARAM; item.iItem=(int)SendMessageW(g_processList,LVM_GETITEMCOUNT,0,0);
+        item.pszText=pid; item.lParam=(LPARAM)p.pid;
+        int index=(int)SendMessageW(g_processList,LVM_INSERTITEMW,0,(LPARAM)&item);
+        ListView_SetItemText(g_processList,index,1,cpu);
+        ListView_SetItemText(g_processList,index,2,mem);
+        ListView_SetItemText(g_processList,index,3,const_cast<LPWSTR>(p.name.c_str()));
+        ListView_SetItemText(g_processList,index,4,const_cast<LPWSTR>(p.description.c_str()));
+    }
+}
+static void TerminateSelectedProcess(HWND hwnd) {
+    int selected=ListView_GetNextItem(g_processList,-1,LVNI_SELECTED);
+    if(selected<0) { MessageBoxW(hwnd,L"Выберите процесс в списке.",L"Завершение процесса",MB_OK|MB_ICONINFORMATION); return; }
+    wchar_t pidText[32]{}; ListView_GetItemText(g_processList,selected,0,pidText,32);
+    DWORD pid=wcstoul(pidText,nullptr,10);
+    wchar_t name[512]{}; ListView_GetItemText(g_processList,selected,3,name,512);
+    std::wstring question=L"Принудительно завершить процесс?\r\n\r\n"+std::wstring(name)+L" (PID "+std::to_wstring(pid)+L")\r\n\r\nНесохранённые данные приложения могут быть потеряны. Не завершайте системные процессы Windows.";
+    if(MessageBoxW(hwnd,question.c_str(),L"Подтверждение",MB_YESNO|MB_ICONWARNING)!=IDYES) return;
+    HANDLE p=OpenProcess(PROCESS_TERMINATE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
+    if(!p) { MessageBoxW(hwnd,L"Нет доступа к процессу. Возможно, он защищён системой.",L"Ошибка",MB_OK|MB_ICONERROR); return; }
+    BOOL ok=TerminateProcess(p,1); DWORD error=ok?0:GetLastError(); CloseHandle(p);
+    if(ok) { MessageBoxW(hwnd,L"Команда завершения отправлена.",L"Готово",MB_OK|MB_ICONINFORMATION); RefreshProcessList(); }
+    else { std::wstring msg=L"Не удалось завершить процесс. Код Windows: "+std::to_wstring(error); MessageBoxW(hwnd,msg.c_str(),L"Ошибка",MB_OK|MB_ICONERROR); }
+}
+static LRESULT CALLBACK ProcessManagerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    switch(msg) {
+    case WM_CREATE: {
+        g_processManager=hwnd;
+        g_processList=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,10,10,1180,560,hwnd,(HMENU)5201,g_instance,nullptr);
+        ListView_SetExtendedListViewStyle(g_processList,LVS_EX_FULLROWSELECT|LVS_EX_GRIDLINES|LVS_EX_DOUBLEBUFFER);
+        const wchar_t* titles[]={L"PID",L"CPU",L"ОЗУ",L"Процесс",L"Описание / назначение"};
+        const int widths[]={80,80,100,220,650};
+        for(int i=0;i<5;++i) { LVCOLUMNW c{}; c.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_SUBITEM; c.pszText=const_cast<LPWSTR>(titles[i]); c.cx=widths[i]; c.iSubItem=i; ListView_InsertColumn(g_processList,i,&c); }
+        CreateWindowW(L"BUTTON",L"Завершить процесс",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,10,582,190,34,hwnd,(HMENU)5202,g_instance,nullptr);
+        CreateWindowW(L"BUTTON",L"Обновить список",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,210,582,150,34,hwnd,(HMENU)5203,g_instance,nullptr);
+        CreateWindowW(L"STATIC",L"CPU — доля общей мощности процессора за интервал 0,5 с; ОЗУ — текущая рабочая память процесса.",WS_CHILD|WS_VISIBLE,380,588,800,24,hwnd,(HMENU)5204,g_instance,nullptr);
+        RefreshProcessList(); return 0;
+    }
+    case WM_SIZE: if(g_processList) MoveWindow(g_processList,10,10,LOWORD(lp)-20,HIWORD(lp)-70,TRUE); return 0;
+    case WM_COMMAND:
+        if(LOWORD(wp)==5202) { TerminateSelectedProcess(hwnd); return 0; }
+        if(LOWORD(wp)==5203) { RefreshProcessList(); return 0; }
+        break;
+    case WM_DESTROY: g_processManager=nullptr; g_processList=nullptr; return 0;
+    }
+    return DefWindowProcW(hwnd,msg,wp,lp);
+}
+static void OpenProcessManager() {
+    if(g_processManager) { ShowWindow(g_processManager,SW_SHOWNORMAL); SetForegroundWindow(g_processManager); return; }
+    WNDCLASSW wc{}; wc.lpfnWndProc=ProcessManagerProc; wc.hInstance=g_instance; wc.lpszClassName=L"PCPM_PROCESS_MANAGER"; wc.hCursor=LoadCursor(nullptr,IDC_ARROW); wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
+    if(!RegisterClassW(&wc)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) { MessageBoxW(g_window,L"Не удалось зарегистрировать окно процессов.",L"Ошибка",MB_OK|MB_ICONERROR); return; }
+    HWND w=CreateWindowW(wc.lpszClassName,L"Процессы Windows — мониторинг и управление",WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,1240,700,g_window,nullptr,g_instance,nullptr);
+    if(!w) MessageBoxW(g_window,L"Не удалось открыть окно процессов.",L"Ошибка",MB_OK|MB_ICONERROR);
+}
 static std::wstring ProcessReport() {
-    std::wstringstream ss; ss << L"PID\tПамять (КБ)\tПроцесс\r\n";
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return L"Не удалось получить список процессов.\r\n";
-    PROCESSENTRY32W pe{}; pe.dwSize = sizeof(pe);
-    if (Process32FirstW(snap, &pe)) do {
-        HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
-        SIZE_T mem = 0; if (p) { PROCESS_MEMORY_COUNTERS_EX pm{}; pm.cb=sizeof(pm);
-            if (GetProcessMemoryInfo(p, (PROCESS_MEMORY_COUNTERS*)&pm, sizeof(pm))) mem=pm.WorkingSetSize/1024; CloseHandle(p); }
-        ss << pe.th32ProcessID << L"\t" << mem << L"\t" << pe.szExeFile << L"\r\n";
-    } while (Process32NextW(snap, &pe));
-    CloseHandle(snap); return ss.str();
+    auto rows=EnumerateProcessRows(); std::wstringstream ss;
+    ss<<L"PID\tCPU %\tОЗУ (МБ)\tПроцесс\tОписание / назначение\r\n";
+    for(const auto& p:rows) ss<<p.pid<<L"\t"<<std::fixed<<std::setprecision(1)<<p.cpuPercent<<L"%\t"<<(p.workingSet/1048576.0)<<L"\t"<<p.name<<L"\t"<<p.description<<L"\r\n";
+    return ss.str();
 }
 struct StartupEntry {
     HKEY hive{};
@@ -948,7 +1077,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 StartTask(L"Отмена SMART self-test",[] { return RunSmartTest(L"-X"); });
             break;
         case ID_DIAG: StartTask(L"Системные события",DiagnosticsReport); break;
-        case ID_PROCESSES: StartTask(L"Процессы",ProcessReport); break;
+        case ID_PROCESSES: OpenProcessManager(); break;
         case ID_STARTUP: OpenStartupManager(); break;
         case ID_RAM: StartTask(L"Индекс RAM",RamIndex); break;
         case ID_TBW: StartTask(L"История TBW",TbwReport); break;
