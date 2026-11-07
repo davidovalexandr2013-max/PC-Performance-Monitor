@@ -821,7 +821,7 @@ static void OpenProcessManager() {
 }
 static std::wstring ServicesReport() {
     std::wstringstream ss;
-    ss << L"=== СЛУЖБЫ WINDOWS ===\\r\\n[РАБОТАЕТ] — запущена; [ОСТАНОВЛЕНА] — не запущена.\\r\\n";
+    ss << L"=== СЛУЖБЫ WINDOWS ===\r\n[РАБОТАЕТ] — запущена; [ОСТАНОВЛЕНА] — не запущена.\r\n";
     SC_HANDLE scm=OpenSCManagerW(nullptr,nullptr,SC_MANAGER_ENUMERATE_SERVICE);
     if(!scm) return L"Не удалось получить список служб. Код Windows: "+std::to_wstring(GetLastError());
     DWORD needed=0,count=0,resume=0;
@@ -833,21 +833,21 @@ static std::wstring ServicesReport() {
     auto* rows=reinterpret_cast<ENUM_SERVICE_STATUS_PROCESSW*>(buffer.data());
     for(DWORD i=0;i<count;++i) {
         const bool running=rows[i].ServiceStatusProcess.dwCurrentState==SERVICE_RUNNING;
-        ss << (running?L"[РАБОТАЕТ] ":L"[ОСТАНОВЛЕНА] ") << rows[i].lpDisplayName << L" (" << rows[i].lpServiceName << L")\\r\\n";
+        ss << (running?L"[РАБОТАЕТ] ":L"[ОСТАНОВЛЕНА] ") << rows[i].lpDisplayName << L" (" << rows[i].lpServiceName << L")\r\n";
         SC_HANDLE service=OpenServiceW(scm,rows[i].lpServiceName,SERVICE_QUERY_CONFIG);
         if(service) {
             DWORD bytes=0; QueryServiceConfigW(service,nullptr,0,&bytes);
             if(bytes) {
                 std::vector<BYTE> cfg(bytes); auto* info=reinterpret_cast<QUERY_SERVICE_CONFIGW*>(cfg.data());
                 if(QueryServiceConfigW(service,info,bytes,&bytes) && info->lpDisplayName)
-                    ss << L"  Описание: " << info->lpDisplayName << L"\\r\\n";
+                    ss << L"  Описание: " << info->lpDisplayName << L"\r\n";
             }
             CloseServiceHandle(service);
         }
-        ss << L"  Не отключайте службу без проверки её назначения и зависимостей.\\r\\n\\r\\n";
+        ss << L"  Не отключайте службу без проверки её назначения и зависимостей.\r\n\r\n";
     }
     CloseServiceHandle(scm);
-    ss << L"Автоматическое отключение служб не выполняется.\\r\\n";
+    ss << L"Автоматическое отключение служб не выполняется.\r\n";
     return ss.str();
 }
 static std::wstring ProcessReport() {
@@ -1125,26 +1125,26 @@ static void DrawColorButton(const DRAWITEMSTRUCT* d) {
 }
 static std::wstring BuildFullReport() {
     std::wstringstream report;
-    report << L"PC PERFORMANCE MONITOR — ПОЛНЫЙ ОТЧЁТ\\r\\n";
-    report << L"Дата формирования: " << Timestamp() << L"\\r\\n";
-    report << L"Версия: 1.3.9 x64\\r\\n";
-    report << L"\\r\\n========== 1. ОБОРУДОВАНИЕ И ОПЕРАТИВНАЯ ПАМЯТЬ ==========\\r\\n" << HardwareReport();
-    report << L"\\r\\n========== 2. ПРОЦЕССЫ И РАСХОД ОЗУ ==========\\r\\n" << ProcessReport();
-    report << L"\\r\\n========== 3. СЛУЖБЫ WINDOWS ==========\\r\\n" << ServicesReport();
-    report << L"\\r\\n========== 4. НАКОПИТЕЛИ И СВОБОДНОЕ МЕСТО ==========\\r\\n" << DiskList();
-    report << L"\\r\\n========== 5. SMART / NVME ==========\\r\\n" << SmartReport();
-    report << L"\\r\\n========== 6. ВОЗМОЖНОСТИ ПРОВЕРКИ ДИСКОВ ==========\\r\\n" << SmartTests();
-    report << L"\\r\\n========== 7. АППАРАТНЫЕ ОШИБКИ WINDOWS ==========\\r\\n" << DiagnosticsReport();
-    report << L"\\r\\n========== 8. АВТОЗАГРУЗКА ==========\\r\\n" << StartupReport();
-    report << L"\\r\\n========== 9. ВРЕМЕННЫЕ ФАЙЛЫ ==========\\r\\n" << TempScan();
-    report << L"\\r\\n========== 10. СОСТОЯНИЕ ОЗУ ==========\\r\\n" << RamIndex();
-    report << L"\\r\\n========== 11. ИСТОРИЯ ЗАПИСИ SSD ==========\\r\\n" << TbwReport();
-    report << L"\\r\\n========== ЖУРНАЛ ТЕКУЩЕГО СЕАНСА ==========\\r\\n";
+    report << L"PC PERFORMANCE MONITOR — ПОЛНЫЙ ОТЧЁТ\r\n";
+    report << L"Дата формирования: " << Timestamp() << L"\r\n";
+    report << L"Версия: 1.3.9 x64\r\n";
+    report << L"\r\n========== 1. ОБОРУДОВАНИЕ И ОПЕРАТИВНАЯ ПАМЯТЬ ==========\r\n" << HardwareReport();
+    report << L"\r\n========== 2. ПРОЦЕССЫ И РАСХОД ОЗУ ==========\r\n" << ProcessReport();
+    report << L"\r\n========== 3. СЛУЖБЫ WINDOWS ==========\r\n" << ServicesReport();
+    report << L"\r\n========== 4. НАКОПИТЕЛИ И СВОБОДНОЕ МЕСТО ==========\r\n" << DiskList();
+    report << L"\r\n========== 5. SMART / NVME ==========\r\n" << SmartReport();
+    report << L"\r\n========== 6. ВОЗМОЖНОСТИ ПРОВЕРКИ ДИСКОВ ==========\r\n" << SmartTests();
+    report << L"\r\n========== 7. АППАРАТНЫЕ ОШИБКИ WINDOWS ==========\r\n" << DiagnosticsReport();
+    report << L"\r\n========== 8. АВТОЗАГРУЗКА ==========\r\n" << StartupReport();
+    report << L"\r\n========== 9. ВРЕМЕННЫЕ ФАЙЛЫ ==========\r\n" << TempScan();
+    report << L"\r\n========== 10. СОСТОЯНИЕ ОЗУ ==========\r\n" << RamIndex();
+    report << L"\r\n========== 11. ИСТОРИЯ ЗАПИСИ SSD ==========\r\n" << TbwReport();
+    report << L"\r\n========== ЖУРНАЛ ТЕКУЩЕГО СЕАНСА ==========\r\n";
     {
         std::lock_guard<std::mutex> lock(g_sessionMutex);
         std::wifstream log(g_sessionLogPath);
         if(log) report << log.rdbuf();
-        else report << L"Журнал сеанса недоступен.\\r\\n";
+        else report << L"Журнал сеанса недоступен.\r\n";
     }
     return report.str();
 }
@@ -1159,15 +1159,14 @@ static std::wstring SaveFullReport() {
     wchar_t name[128]{};
     swprintf_s(name,L"PC_Performance_Report_%04u%02u%02u_%02u%02u%02u.txt",
         now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute,now.wSecond);
-    std::wstring path=folder+L"\\ "+name;
-    path=folder+L"\\"+name;
+    std::wstring path=folder+L"\\"+name;
     const std::string utf8=Utf8(body);
     std::ofstream file(fs::path(path),std::ios::binary|std::ios::trunc);
-    if(!file) return L"ОШИБКА: не удалось создать файл отчёта. Путь: "+path+L"\\r\\n";
+    if(!file) return L"ОШИБКА: не удалось создать файл отчёта. Путь: "+path+L"\r\n";
     file.write(utf8.data(),(std::streamsize)utf8.size());
     file.flush();
-    if(!file.good()) return L"ОШИБКА: не удалось полностью записать отчёт. Путь: "+path+L"\\r\\n";
-    return L"ОТЧЁТ УСПЕШНО СОЗДАН\\r\\nФайл: "+path+L"\\r\\nРазмер: "+std::to_wstring(utf8.size())+L" байт\\r\\nРазделов: 11 + журнал сеанса.\\r\\n";
+    if(!file.good()) return L"ОШИБКА: не удалось полностью записать отчёт. Путь: "+path+L"\r\n";
+    return L"ОТЧЁТ УСПЕШНО СОЗДАН\r\nФайл: "+path+L"\r\nРазмер: "+std::to_wstring(utf8.size())+L" байт\r\nРазделов: 11 + журнал сеанса.\r\n";
 }
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch(msg) {
