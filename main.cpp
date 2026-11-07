@@ -523,53 +523,93 @@ static std::wstring TbwReport() {
     return ss.str();
 }
 
+static std::wstring HResultText(HRESULT hr) {
+    wchar_t b[32]{}; swprintf_s(b,L"0x%08X",(unsigned)hr); return b;
+}
 static std::wstring WmiQuery(const wchar_t* query, const wchar_t* property) {
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    bool uninit = SUCCEEDED(hr);
-    IWbemLocator* loc = nullptr; IWbemServices* svc = nullptr;
-    std::wstringstream out;
-    hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (void**)&loc);
-    if (FAILED(hr)) { if (uninit) CoUninitialize(); return L"WMI недоступен.\r\n"; }
-    BSTR ns = SysAllocString(L"ROOT\\CIMV2");
-    hr = loc->ConnectServer(ns, nullptr, nullptr, nullptr, 0, nullptr, nullptr, &svc);
-    SysFreeString(ns);
-    if (SUCCEEDED(hr)) {
-        CoSetProxyBlanket(svc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, nullptr, RPC_C_AUTHN_LEVEL_CALL,
-            RPC_C_IMP_LEVEL_IMPERSONATE, nullptr, EOAC_NONE);
-        IEnumWbemClassObject* en = nullptr;
-        BSTR q = SysAllocString(query);
-        BSTR language = SysAllocString(L"WQL");
-        hr = svc->ExecQuery(language, q, WBEM_FLAG_FORWARD_ONLY|WBEM_FLAG_RETURN_IMMEDIATELY, nullptr, &en);
-        SysFreeString(language);
-        SysFreeString(q);
-        if (SUCCEEDED(hr) && en) {
-            IWbemClassObject* obj = nullptr; ULONG count = 0;
-            while (en->Next(WBEM_INFINITE, 1, &obj, &count) == S_OK && count) {
-                VARIANT v; VariantInit(&v);
-                if (SUCCEEDED(obj->Get(property, 0, &v, nullptr, nullptr))) {
-                    _bstr_t b(v); out << (const wchar_t*)b << L"\r\n";
-                }
-                VariantClear(&v); obj->Release();
+    HRESULT init=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    const bool uninit=(init==S_OK||init==S_FALSE);
+    if(FAILED(init)&&init!=RPC_E_CHANGED_MODE)
+        return L"[Ошибка инициализации COM: "+HResultText(init)+L"]\r\n";
+    IWbemLocator* loc=nullptr; IWbemServices* svc=nullptr; IEnumWbemClassObject* en=nullptr;
+    std::wstringstream out; HRESULT hr=CoCreateInstance(CLSID_WbemLocator,nullptr,CLSCTX_INPROC_SERVER,IID_IWbemLocator,(void**)&loc);
+    if(FAILED(hr)) { out<<L"[WMI: CoCreateInstance: "<<HResultText(hr)<<L"]\r\n"; if(uninit) CoUninitialize(); return out.str(); }
+    BSTR ns=SysAllocString(L"ROOT\\CIMV2");
+    hr=loc->ConnectServer(ns,nullptr,nullptr,nullptr,0,nullptr,nullptr,&svc); SysFreeString(ns);
+    if(FAILED(hr)) { out<<L"[WMI: ConnectServer: "<<HResultText(hr)<<L"]\r\n"; loc->Release(); if(uninit) CoUninitialize(); return out.str(); }
+    hr=CoSetProxyBlanket(svc,RPC_C_AUTHN_WINNT,RPC_C_AUTHZ_NONE,nullptr,RPC_C_AUTHN_LEVEL_CALL,RPC_C_IMP_LEVEL_IMPERSONATE,nullptr,EOAC_NONE);
+    if(FAILED(hr)) out<<L"[Предупреждение WMI: CoSetProxyBlanket: "<<HResultText(hr)<<L"]\r\n";
+    BSTR language=SysAllocString(L"WQL"), q=SysAllocString(query);
+    hr=svc->ExecQuery(language,q,WBEM_FLAG_FORWARD_ONLY,nullptr,&en);
+    SysFreeString(language); SysFreeString(q);
+    if(FAILED(hr)) out<<L"[WMI: ExecQuery: "<<HResultText(hr)<<L"]\r\n";
+    else if(en) {
+        for(;;) {
+            IWbemClassObject* obj=nullptr; ULONG count=0;
+            hr=en->Next(5000,1,&obj,&count);
+            if(hr==WBEM_S_TIMEDOUT||hr==WBEM_S_FALSE||count==0) break;
+            if(FAILED(hr)) { out<<L"[WMI: Next: "<<HResultText(hr)<<L"]\r\n"; break; }
+            VARIANT v; VariantInit(&v);
+            HRESULT get=obj->Get(property,0,&v,nullptr,nullptr);
+            if(SUCCEEDED(get)&&v.vt!=VT_NULL&&v.vt!=VT_EMPTY) {
+                VARIANT converted; VariantInit(&converted);
+                if(SUCCEEDED(VariantChangeType(&converted,&v,0,VT_BSTR))&&converted.bstrVal)
+                    out<<converted.bstrVal<<L"\r\n";
+                else out<<L"(тип данных не поддержан)\r\n";
+                VariantClear(&converted);
             }
-            en->Release();
+            VariantClear(&v); obj->Release();
         }
-        svc->Release();
+        en->Release();
     }
-    loc->Release(); if (uninit) CoUninitialize();
+    svc->Release(); loc->Release(); if(uninit) CoUninitialize();
     return out.str();
+}
+static std::wstring NativeCpuName() {
+    HKEY key{}; wchar_t value[512]{}; DWORD bytes=sizeof(value),type=0;
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",0,KEY_QUERY_VALUE,&key)==ERROR_SUCCESS) {
+        LONG rc=RegQueryValueExW(key,L"ProcessorNameString",nullptr,&type,(BYTE*)value,&bytes); RegCloseKey(key);
+        if(rc==ERROR_SUCCESS&&value[0]) return value;
+    }
+    return L"Не удалось определить модель CPU через реестр Windows";
 }
 static std::wstring HardwareReport() {
     std::wstringstream ss;
-    ss << L"=== CPU ===\r\n" << WmiQuery(L"SELECT Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed FROM Win32_Processor", L"Name");
-    ss << L"\r\n=== Модули памяти ===\r\n";
-    ss << L"Производитель: " << WmiQuery(L"SELECT Manufacturer FROM Win32_PhysicalMemory", L"Manufacturer");
-    ss << L"Модель: " << WmiQuery(L"SELECT PartNumber FROM Win32_PhysicalMemory", L"PartNumber");
-    ss << L"Объём (байт): " << WmiQuery(L"SELECT Capacity FROM Win32_PhysicalMemory", L"Capacity");
-    ss << L"Скорость (MT/s): " << WmiQuery(L"SELECT Speed FROM Win32_PhysicalMemory", L"Speed");
-    ss << L"Настроенная скорость (MT/s): " << WmiQuery(L"SELECT ConfiguredClockSpeed FROM Win32_PhysicalMemory", L"ConfiguredClockSpeed");
-    ss << L"\r\n=== Температурные зоны ACPI (если доступны) ===\r\n";
-    ss << WmiQuery(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature", L"CurrentTemperature");
-    ss << L"Примечание: ACPI часто не предоставляет температуру CPU/GPU на современных ПК.\r\n";
+    SYSTEM_INFO si{}; GetSystemInfo(&si);
+    MEMORYSTATUSEX memory{}; memory.dwLength=sizeof(memory); GlobalMemoryStatusEx(&memory);
+    ULONGLONG installedKB=0; const BOOL haveInstalled=GetPhysicallyInstalledSystemMemory(&installedKB);
+    ss<<L"=== ОБОРУДОВАНИЕ КОМПЬЮТЕРА ===\r\n";
+    ss<<L"Источник базовых данных: API Windows; расширенные сведения: WMI (если служба доступна).\r\n";
+    ss<<L"\r\n=== ПРОЦЕССОР ===\r\n";
+    std::wstring cpu=WmiQuery(L"SELECT Name FROM Win32_Processor",L"Name");
+    if(cpu.empty()||cpu[0]==L'[') cpu=NativeCpuName()+L"\r\n";
+    ss<<L"Модель: "<<cpu;
+    ss<<L"Логических процессоров: "<<si.dwNumberOfProcessors<<L"\r\n";
+    ss<<L"\r\n=== ОПЕРАТИВНАЯ ПАМЯТЬ ===\r\n";
+    ss<<L"Установлено: ";
+    if(haveInstalled) ss<<std::fixed<<std::setprecision(2)<<(double)installedKB/1048576.0<<L" ГБ\r\n";
+    else ss<<L"не удалось определить через Windows API\r\n";
+    ss<<L"Доступно сейчас: "<<std::fixed<<std::setprecision(2)<<(double)memory.ullAvailPhys/1073741824.0<<L" ГБ из "<<(double)memory.ullTotalPhys/1073741824.0<<L" ГБ\r\n";
+    ss<<L"\r\n=== МОДУЛИ ПАМЯТИ (WMI) ===\r\n";
+    ss<<L"Производитель: "<<WmiQuery(L"SELECT Manufacturer FROM Win32_PhysicalMemory",L"Manufacturer");
+    ss<<L"Модель/Part Number: "<<WmiQuery(L"SELECT PartNumber FROM Win32_PhysicalMemory",L"PartNumber");
+    ss<<L"Объём одного модуля (байт): "<<WmiQuery(L"SELECT Capacity FROM Win32_PhysicalMemory",L"Capacity");
+    ss<<L"Скорость (MT/s): "<<WmiQuery(L"SELECT Speed FROM Win32_PhysicalMemory",L"Speed");
+    ss<<L"Настроенная скорость (MT/s): "<<WmiQuery(L"SELECT ConfiguredClockSpeed FROM Win32_PhysicalMemory",L"ConfiguredClockSpeed");
+    ss<<L"\r\n=== МАТЕРИНСКАЯ ПЛАТА / СИСТЕМА ===\r\n";
+    ss<<L"Производитель: "<<WmiQuery(L"SELECT Manufacturer FROM Win32_ComputerSystem",L"Manufacturer");
+    ss<<L"Модель: "<<WmiQuery(L"SELECT Model FROM Win32_ComputerSystem",L"Model");
+    ss<<L"Плата: "<<WmiQuery(L"SELECT Manufacturer FROM Win32_BaseBoard",L"Manufacturer");
+    ss<<L"Модель платы: "<<WmiQuery(L"SELECT Product FROM Win32_BaseBoard",L"Product");
+    ss<<L"\r\n=== ВИДЕОАДАПТЕРЫ ===\r\n";
+    ss<<WmiQuery(L"SELECT Name FROM Win32_VideoController",L"Name");
+    ss<<L"\r\n=== НАКОПИТЕЛИ ===\r\n";
+    ss<<WmiQuery(L"SELECT Model FROM Win32_DiskDrive",L"Model");
+    ss<<L"\r\n=== BIOS ===\r\n";
+    ss<<WmiQuery(L"SELECT SMBIOSBIOSVersion FROM Win32_BIOS",L"SMBIOSBIOSVersion");
+    ss<<L"\r\n=== ТЕМПЕРАТУРНЫЕ ЗОНЫ ACPI (если доступны) ===\r\n";
+    ss<<WmiQuery(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature",L"CurrentTemperature");
+    ss<<L"Примечание: WMI/ACPI может не предоставлять температуры CPU/GPU на современных ПК. Если WMI недоступен, базовые сведения CPU и RAM всё равно выводятся через API Windows.\r\n";
     return ss.str();
 }
 
