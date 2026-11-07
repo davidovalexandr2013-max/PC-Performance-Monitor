@@ -650,7 +650,7 @@ static std::vector<StartupEntry> EnumerateStartupEntries() {
             e.valueName.assign(name.data(),nameLen);
             e.command.assign(reinterpret_cast<const wchar_t*>(data.data()),
                 dataLen/sizeof(wchar_t));
-            while (!e.command.empty() && e.command.back()==L'\\0') e.command.pop_back();
+            while (!e.command.empty() && e.command.back()==L'\0') e.command.pop_back();
             e.view=root.view;
             entries.push_back(std::move(e));
         }
@@ -856,7 +856,7 @@ static void DrawColorButton(const DRAWITEMSTRUCT* d) {
     if(d->itemState&ODS_DISABLED) c=RGB(75,82,100);
     if(d->itemState&ODS_SELECTED) c=RGB(35,65,105);
     for(int y=r.top;y<r.bottom;++y) {
-        int k=((y-r.top)*30)/std::max(1,r.bottom-r.top);
+        int k=((y-r.top)*30)/((r.bottom-r.top)>1?(r.bottom-r.top):1);
         COLORREF line=RGB((BYTE)std::max(0,(int)GetRValue(c)-k),(BYTE)std::max(0,(int)GetGValue(c)-k),(BYTE)std::max(0,(int)GetBValue(c)-k));
         HPEN p=CreatePen(PS_SOLID,1,line); HGDIOBJ old=SelectObject(d->hDC,p);
         MoveToEx(d->hDC,r.left+4,y,nullptr); LineTo(d->hDC,r.right-4,y);
