@@ -611,6 +611,127 @@ static std::wstring ProcessReport() {
     } while (Process32NextW(snap, &pe));
     CloseHandle(snap); return ss.str();
 }
+struct StartupEntry {
+    HKEY hive{};
+    std::wstring hiveName, subkey, valueName, command;
+    REGSAM view{};
+};
+static std::vector<StartupEntry> g_startupEntries;
+static HWND g_startupManager{}, g_startupList{};
+
+static std::vector<StartupEntry> EnumerateStartupEntries() {
+    std::vector<StartupEntry> entries;
+    const wchar_t* paths[] = {
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
+    };
+    struct Root { HKEY key; const wchar_t* name; REGSAM view; };
+    const Root roots[] = {
+        {HKEY_CURRENT_USER,L"HKCU",KEY_WOW64_64KEY},
+        {HKEY_LOCAL_MACHINE,L"HKLM",KEY_WOW64_64KEY}
+    };
+    for (const auto& root : roots) for (const auto* path : paths) {
+        HKEY key{};
+        if (RegOpenKeyExW(root.key,path,0,KEY_READ|root.view,&key)!=ERROR_SUCCESS) continue;
+        for (DWORD i=0;;++i) {
+            DWORD nameLen=0, dataLen=0, type=0;
+            LONG rc=RegEnumValueW(key,i,nullptr,&nameLen,nullptr,&type,nullptr,&dataLen);
+            if (rc==ERROR_NO_MORE_ITEMS) break;
+            if (rc!=ERROR_SUCCESS && rc!=ERROR_MORE_DATA) continue;
+            std::vector<wchar_t> name(nameLen+2), data((dataLen/sizeof(wchar_t))+4);
+            DWORD nc=(DWORD)name.size(), dc=(DWORD)(data.size()*sizeof(wchar_t));
+            rc=RegEnumValueW(key,i,name.data(),&nc,nullptr,&type,
+                reinterpret_cast<BYTE*>(data.data()),&dc);
+            if (rc!=ERROR_SUCCESS || (type!=REG_SZ && type!=REG_EXPAND_SZ)) continue;
+            StartupEntry e;
+            e.hive=root.key; e.hiveName=root.name; e.subkey=path;
+            e.valueName.assign(name.data(),nc);
+            e.command.assign(data.data());
+            e.view=root.view;
+            entries.push_back(std::move(e));
+        }
+        RegCloseKey(key);
+    }
+    return entries;
+}
+static void RefreshStartupList() {
+    if (!g_startupList) return;
+    g_startupEntries=EnumerateStartupEntries();
+    SendMessageW(g_startupList,LB_RESETCONTENT,0,0);
+    for (const auto& e:g_startupEntries) {
+        std::wstring line=L"["+e.hiveName+L"] "+e.valueName+L" — "+e.command;
+        SendMessageW(g_startupList,LB_ADDSTRING,0,(LPARAM)line.c_str());
+    }
+}
+static LRESULT CALLBACK StartupManagerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    switch(msg) {
+    case WM_CREATE:
+        g_startupManager=hwnd;
+        g_startupList=CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",
+            WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT,
+            12,12,820,360,hwnd,(HMENU)5101,g_instance,nullptr);
+        CreateWindowW(L"BUTTON",L"Удалить из автозагрузки",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+            12,384,220,32,hwnd,(HMENU)5102,g_instance,nullptr);
+        CreateWindowW(L"BUTTON",L"Обновить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+            244,384,110,32,hwnd,(HMENU)5103,g_instance,nullptr);
+        CreateWindowW(L"BUTTON",L"Закрыть",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+            722,384,110,32,hwnd,(HMENU)5104,g_instance,nullptr);
+        RefreshStartupList();
+        return 0;
+    case WM_SIZE:
+        if(g_startupList) MoveWindow(g_startupList,12,12,LOWORD(lp)-24,HIWORD(lp)-72,TRUE);
+        return 0;
+    case WM_COMMAND:
+        if(LOWORD(wp)==5103) { RefreshStartupList(); return 0; }
+        if(LOWORD(wp)==5104) { DestroyWindow(hwnd); return 0; }
+        if(LOWORD(wp)==5102) {
+            LRESULT selected=SendMessageW(g_startupList,LB_GETCURSEL,0,0);
+            if(selected==LB_ERR || (size_t)selected>=g_startupEntries.size()) {
+                MessageBoxW(hwnd,L"Сначала выберите запись автозагрузки.",L"Автозагрузка",MB_OK|MB_ICONINFORMATION);
+                return 0;
+            }
+            const StartupEntry entry=g_startupEntries[(size_t)selected];
+            std::wstring question=L"Удалить только запись автозапуска?\r\n\r\n"+
+                entry.hiveName+L"\\ "+entry.subkey+L"\r\n"+entry.valueName+
+                L" = "+entry.command+L"\r\n\r\nСамо приложение и его файлы останутся на компьютере.";
+            if(MessageBoxW(hwnd,question.c_str(),L"Подтверждение удаления",MB_YESNO|MB_ICONWARNING)!=IDYES) return 0;
+            HKEY key{};
+            LONG rc=RegOpenKeyExW(entry.hive,entry.subkey.c_str(),0,KEY_SET_VALUE|entry.view,&key);
+            if(rc==ERROR_SUCCESS) {
+                rc=RegDeleteValueW(key,entry.valueName.c_str());
+                RegCloseKey(key);
+            }
+            if(rc==ERROR_SUCCESS) {
+                MessageBoxW(hwnd,L"Запись удалена из автозагрузки. Приложение не деинсталлировано.",L"Готово",MB_OK|MB_ICONINFORMATION);
+                RefreshStartupList();
+            } else {
+                std::wstring err=L"Не удалось удалить запись. Код Windows: "+std::to_wstring(rc)+
+                    L". Для записей HKLM может потребоваться запуск программы от имени администратора.";
+                MessageBoxW(hwnd,err.c_str(),L"Ошибка удаления",MB_OK|MB_ICONERROR);
+            }
+            return 0;
+        }
+        break;
+    case WM_DESTROY:
+        g_startupManager=nullptr; g_startupList=nullptr; g_startupEntries.clear();
+        return 0;
+    }
+    return DefWindowProcW(hwnd,msg,wp,lp);
+}
+static void OpenStartupManager() {
+    if(g_startupManager) { ShowWindow(g_startupManager,SW_SHOWNORMAL); SetForegroundWindow(g_startupManager); return; }
+    WNDCLASSW wc{}; wc.lpfnWndProc=StartupManagerProc; wc.hInstance=g_instance;
+    wc.lpszClassName=L"PCPM_STARTUP_MANAGER"; wc.hCursor=LoadCursor(nullptr,IDC_ARROW);
+    wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
+    if(!RegisterClassW(&wc) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) {
+        MessageBoxW(g_window,L"Не удалось зарегистрировать окно управления автозагрузкой.",L"Ошибка",MB_OK|MB_ICONERROR); return;
+    }
+    HWND w=CreateWindowW(wc.lpszClassName,L"Управление автозагрузкой Windows",
+        WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,860,470,
+        g_window,nullptr,g_instance,nullptr);
+    if(!w) MessageBoxW(g_window,L"Не удалось открыть управление автозагрузкой.",L"Ошибка",MB_OK|MB_ICONERROR);
+}
+
 static std::wstring StartupReport() {
     std::wstringstream ss;
     const wchar_t* paths[] = {
@@ -777,7 +898,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
         case ID_DIAG: StartTask(L"Системные события",DiagnosticsReport); break;
         case ID_PROCESSES: StartTask(L"Процессы",ProcessReport); break;
-        case ID_STARTUP: StartTask(L"Автозагрузка",StartupReport); break;
+        case ID_STARTUP: OpenStartupManager(); break;
         case ID_RAM: StartTask(L"Индекс RAM",RamIndex); break;
         case ID_TBW: StartTask(L"История TBW",TbwReport); break;
         case ID_TEMP: StartTask(L"Анализ временных файлов",TempScan); break;
