@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - ci/windows-x64-v1.3.5
-      - ads-local-v1.4.1
+      - ads-image-v1.4.2
     paths:
       - "main.cpp"
       - "ads/**"
@@ -31,7 +31,7 @@ jobs:
       - name: Verify executable
         shell: pwsh
         run: |
-          $exe = "build/Release/PC_Performance_Monitor_v1_4_1_x64.exe"
+          $exe = "build/Release/PC_Performance_Monitor_v1_4_2_x64.exe"
           if (!(Test-Path $exe)) { throw "Executable was not produced: $exe" }
           $item = Get-Item $exe
           Write-Host "EXE size: $($item.Length) bytes"
@@ -40,7 +40,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PC-Performance-Monitor-v1.4.1-Windows-x64
+          name: PC-Performance-Monitor-v1.4.2-Windows-x64
           path: |
             build/Release/PC_Performance_Monitor_v1_4_1_x64.exe
             build/Release/PC_Performance_Monitor_AdServer_x64.exe
