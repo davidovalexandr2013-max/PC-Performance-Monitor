@@ -819,6 +819,37 @@ static void OpenProcessManager() {
     HWND w=CreateWindowW(wc.lpszClassName,L"Процессы Windows — мониторинг и управление",WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,1240,700,g_window,nullptr,g_instance,nullptr);
     if(!w) MessageBoxW(g_window,L"Не удалось открыть окно процессов.",L"Ошибка",MB_OK|MB_ICONERROR);
 }
+static std::wstring ServicesReport() {
+    std::wstringstream ss;
+    ss << L"=== СЛУЖБЫ WINDOWS ===\\r\\n[РАБОТАЕТ] — запущена; [ОСТАНОВЛЕНА] — не запущена.\\r\\n";
+    SC_HANDLE scm=OpenSCManagerW(nullptr,nullptr,SC_MANAGER_ENUMERATE_SERVICE);
+    if(!scm) return L"Не удалось получить список служб. Код Windows: "+std::to_wstring(GetLastError());
+    DWORD needed=0,count=0,resume=0;
+    EnumServicesStatusExW(scm,SC_ENUM_PROCESS_INFO,SERVICE_WIN32,SERVICE_STATE_ALL,nullptr,0,&needed,&count,&resume,nullptr);
+    std::vector<BYTE> buffer((size_t)needed+4096);
+    if(!EnumServicesStatusExW(scm,SC_ENUM_PROCESS_INFO,SERVICE_WIN32,SERVICE_STATE_ALL,buffer.data(),(DWORD)buffer.size(),&needed,&count,&resume,nullptr)) {
+        DWORD e=GetLastError(); CloseServiceHandle(scm); return L"Ошибка получения служб. Код Windows: "+std::to_wstring(e);
+    }
+    auto* rows=reinterpret_cast<ENUM_SERVICE_STATUS_PROCESSW*>(buffer.data());
+    for(DWORD i=0;i<count;++i) {
+        const bool running=rows[i].ServiceStatusProcess.dwCurrentState==SERVICE_RUNNING;
+        ss << (running?L"[РАБОТАЕТ] ":L"[ОСТАНОВЛЕНА] ") << rows[i].lpDisplayName << L" (" << rows[i].lpServiceName << L")\\r\\n";
+        SC_HANDLE service=OpenServiceW(scm,rows[i].lpServiceName,SERVICE_QUERY_CONFIG);
+        if(service) {
+            DWORD bytes=0; QueryServiceConfigW(service,nullptr,0,&bytes);
+            if(bytes) {
+                std::vector<BYTE> cfg(bytes); auto* info=reinterpret_cast<QUERY_SERVICE_CONFIGW*>(cfg.data());
+                if(QueryServiceConfigW(service,info,bytes,&bytes) && info->lpDisplayName)
+                    ss << L"  Описание: " << info->lpDisplayName << L"\\r\\n";
+            }
+            CloseServiceHandle(service);
+        }
+        ss << L"  Не отключайте службу без проверки её назначения и зависимостей.\\r\\n\\r\\n";
+    }
+    CloseServiceHandle(scm);
+    ss << L"Автоматическое отключение служб не выполняется.\\r\\n";
+    return ss.str();
+}
 static std::wstring ProcessReport() {
     auto rows=EnumerateProcessRows(); std::wstringstream ss;
     ss<<L"PID\tCPU %\tОЗУ (МБ)\tПроцесс\tОписание / назначение\r\n";
