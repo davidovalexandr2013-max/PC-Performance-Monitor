@@ -25,6 +25,8 @@
 #include <wbemidl.h>
 #include <comdef.h>
 #include <shellapi.h>
+#include <winhttp.h>
+#include "ads/AdsClient.h"
 #include <shlobj.h>
 #include <algorithm>
 #include <array>
@@ -66,6 +68,7 @@
 namespace fs = std::filesystem;
 static HINSTANCE g_instance{};
 static HWND g_window{}, g_output{}, g_status{};
+static unsigned g_adRefreshTicks = 0;
 static std::mutex g_uiMutex;
 static bool g_closing = false; // accessed on UI thread only
 static std::atomic<unsigned> g_activeTasks{0};
@@ -1114,7 +1117,7 @@ static void AddButton(HWND parent, const wchar_t* label, int id, int x, int y, i
     CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,x,y,w,32,parent,(HMENU)(INT_PTR)id,g_instance,nullptr);
 }
 enum { ID_HARDWARE=100, ID_SMART, ID_TEST_STATUS, ID_TEST_SHORT, ID_TEST_LONG, ID_DISKS, ID_DIAG, ID_PROCESSES,
-       ID_STARTUP, ID_RAM, ID_TBW, ID_TEMP, ID_BENCH, ID_SAVE, ID_CANCEL_TEST };
+       ID_STARTUP, ID_RAM, ID_TBW, ID_TEMP, ID_BENCH, ID_SAVE, ID_CANCEL_TEST, ID_AD_BANNER };
 static COLORREF ButtonColor(int id) {
     switch(id) {
     case ID_HARDWARE: case ID_SMART: case ID_DISKS: return RGB(18,145,190);
@@ -1122,6 +1125,7 @@ static COLORREF ButtonColor(int id) {
     case ID_DIAG: case ID_PROCESSES: case ID_STARTUP: return RGB(20,150,125);
     case ID_RAM: case ID_TBW: return RGB(40,115,195);
     case ID_TEMP: case ID_BENCH: return RGB(195,120,35);
+    case ID_AD_BANNER: return RGB(120,75,25);
     default: return RGB(45,105,175);
     }
 }
@@ -1196,6 +1200,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CREATE: {
         g_window=hwnd;
         SetTimer(hwnd, 1, 2000, nullptr);
+        SetTimer(hwnd, 2, 10000, nullptr);
         SessionLog(L"MAIN_WINDOW_CREATED");
         CaptureProcessActivity();
         AddButton(hwnd,L"Оборудование",ID_HARDWARE,10,10);
@@ -1213,9 +1218,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         AddButton(hwnd,L"Временные файлы",ID_TEMP,800,48);
         AddButton(hwnd,L"Тест записи",ID_BENCH,958,48);
         AddButton(hwnd,L"Сохранить отчёт",ID_SAVE,10,86);
+        PCPMAds::Refresh();
+        AddButton(hwnd,PCPMAds::Label().c_str(),ID_AD_BANNER,10,126,1110);
         g_output=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"PC Performance Monitor C++ x64\r\nВыберите модуль сверху.",
             WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY|ES_NOHIDESEL,
-            10,126,1110,570,hwnd,(HMENU)200,g_instance,nullptr);
+            10,166,1110,530,hwnd,(HMENU)200,g_instance,nullptr);
         g_status=CreateWindowW(L"STATIC",L"Готово",WS_CHILD|WS_VISIBLE,10,704,1100,24,hwnd,(HMENU)201,g_instance,nullptr);
         return 0;
     }
@@ -1237,12 +1244,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         static HBRUSH b=CreateSolidBrush(RGB(20,31,52)); return (LRESULT)b;
     }
     case WM_SIZE: {
-        if(g_output) MoveWindow(g_output,10,126,LOWORD(lp)-20,HIWORD(lp)-160,TRUE);
+        if(g_output) MoveWindow(g_output,10,166,LOWORD(lp)-20,HIWORD(lp)-200,TRUE);
         if(g_status) MoveWindow(g_status,10,HIWORD(lp)-28,LOWORD(lp)-20,22,TRUE);
         return 0;
     }
     case WM_TIMER:
         if (wp == 1 && !g_closing) CaptureProcessActivity();
+        if (wp == 2 && !g_closing) { PCPMAds::Rotate(); if (++g_adRefreshTicks >= 6) { g_adRefreshTicks=0; PCPMAds::Refresh(); } HWND ad=GetDlgItem(hwnd,ID_AD_BANNER); if(ad) SetWindowTextW(ad,PCPMAds::Label().c_str()); }
         return 0;
     case WM_COMMAND:
         switch(LOWORD(wp)) {
@@ -1272,6 +1280,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case ID_TEMP: StartTask(L"Анализ временных файлов",TempScan); break;
         case ID_BENCH: if(MessageBoxW(hwnd,L"Выполнить запись тестового файла 128 MiB на системный временный каталог? Данные теста будут удалены.",L"Подтверждение",MB_YESNO|MB_ICONWARNING)==IDYES) StartTask(L"Тест записи",Benchmark); break;
         case ID_SAVE: StartTask(L"Формирование и сохранение полного отчёта",SaveFullReport); break;
+        case ID_AD_BANNER: if(!PCPMAds::Open()) MessageBoxW(hwnd,L"Нет активной рекламы. Запустите PC_Performance_Monitor_AdServer_x64.exe и откройте http://127.0.0.1:8765/admin",L"Реклама",MB_OK|MB_ICONINFORMATION); break;
         }
         return 0;
     case WM_APP_RESULT: {
@@ -1292,6 +1301,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_DESTROY:
         KillTimer(hwnd, 1);
+        KillTimer(hwnd, 2);
         SessionLog(L"MAIN_WINDOW_DESTROYED");
         EndSessionLog();
         PostQuitMessage(0); return 0;
