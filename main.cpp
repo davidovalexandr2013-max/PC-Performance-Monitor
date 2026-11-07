@@ -842,12 +842,14 @@ static void AddButton(HWND parent, const wchar_t* label, int id, int x, int y, i
 enum { ID_HARDWARE=100, ID_SMART, ID_TEST_STATUS, ID_TEST_SHORT, ID_TEST_LONG, ID_DISKS, ID_DIAG, ID_PROCESSES,
        ID_STARTUP, ID_RAM, ID_TBW, ID_TEMP, ID_BENCH, ID_SAVE, ID_CANCEL_TEST };
 static COLORREF ButtonColor(int id) {
-    if(id>=ID_HARDWARE && id<=ID_DISKS) return RGB(18,145,190);
-    if(id>=ID_TEST_STATUS && id<=ID_CANCEL_TEST) return RGB(105,78,195);
-    if(id>=ID_DIAG && id<=ID_STARTUP) return RGB(20,150,125);
-    if(id==ID_RAM || id==ID_TBW) return RGB(40,115,195);
-    if(id==ID_TEMP || id==ID_BENCH) return RGB(195,120,35);
-    return RGB(45,105,175);
+    switch(id) {
+    case ID_HARDWARE: case ID_SMART: case ID_DISKS: return RGB(18,145,190);
+    case ID_TEST_STATUS: case ID_TEST_SHORT: case ID_TEST_LONG: case ID_CANCEL_TEST: return RGB(105,78,195);
+    case ID_DIAG: case ID_PROCESSES: case ID_STARTUP: return RGB(20,150,125);
+    case ID_RAM: case ID_TBW: return RGB(40,115,195);
+    case ID_TEMP: case ID_BENCH: return RGB(195,120,35);
+    default: return RGB(45,105,175);
+    }
 }
 static void DrawColorButton(const DRAWITEMSTRUCT* d) {
     RECT r=d->rcItem; COLORREF c=ButtonColor((int)d->CtlID);
@@ -977,8 +979,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 static void StartupLog(const wchar_t* stage, DWORD errorCode=0) {
-    std::wofstream f(AppDataDir()+L"\\\\startup.log",std::ios::app);
-    if(f) f<<Timestamp()<<L" | "<<stage<<L" | GetLastError="<<errorCode<<L"\\r\\n";
+    std::wofstream f(AppDataDir()+L"\\startup.log",std::ios::app);
+    if(f) f<<Timestamp()<<L" | "<<stage<<L" | GetLastError="<<errorCode<<L"\r\n";
 }
 int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int) {
     g_instance=hInst; StartupLog(L"process started");
