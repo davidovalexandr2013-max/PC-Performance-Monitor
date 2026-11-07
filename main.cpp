@@ -1144,6 +1144,7 @@ static void DrawColorButton(const DRAWITEMSTRUCT* d) {
     HGDIOBJ ob=SelectObject(d->hDC,GetStockObject(NULL_BRUSH));
     RoundRect(d->hDC,r.left+1,r.top+1,r.right-1,r.bottom-1,10,10);
     SelectObject(d->hDC,op); SelectObject(d->hDC,ob); DeleteObject(edge);
+    if ((int)d->CtlID==ID_AD_BANNER && PCPMAds::Bitmap()) { BITMAP bm{}; GetObjectW(PCPMAds::Bitmap(),sizeof(bm),&bm); HDC mem=CreateCompatibleDC(d->hDC); HGDIOBJ old=SelectObject(mem,PCPMAds::Bitmap()); RECT imageRect=r; imageRect.left+=5; imageRect.top+=3; imageRect.bottom-=3; imageRect.right=imageRect.left+150; StretchBlt(d->hDC,imageRect.left,imageRect.top,imageRect.right-imageRect.left,imageRect.bottom-imageRect.top,mem,0,0,bm.bmWidth,bm.bmHeight,SRCCOPY); SelectObject(mem,old); DeleteDC(mem); r.left+=165; }
     SetBkMode(d->hDC,TRANSPARENT); SetTextColor(d->hDC,RGB(255,255,255));
     wchar_t label[256]{}; GetWindowTextW(d->hwndItem,label,256);
     DrawTextW(d->hDC,label,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
@@ -1153,7 +1154,7 @@ static std::wstring BuildFullReport() {
     std::wstringstream report;
     report << L"PC PERFORMANCE MONITOR — ПОЛНЫЙ ОТЧЁТ\r\n";
     report << L"Дата формирования: " << Timestamp() << L"\r\n";
-    report << L"Версия: 1.4.1 x64\r\n";
+    report << L"Версия: 1.4.2 x64\r\n";
     report << L"Запись активности начата автоматически при запуске программы. Интервал снимка процессов: 10 секунд. Запись останавливается при закрытии программы.\r\n";
     report << L"\r\n========== 1. ОБОРУДОВАНИЕ И ОПЕРАТИВНАЯ ПАМЯТЬ ==========\r\n" << HardwareReport();
     report << L"\r\n========== 2. ПРОЦЕССЫ И РАСХОД ОЗУ ==========\r\n" << ProcessReport();
@@ -1218,6 +1219,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         AddButton(hwnd,L"Временные файлы",ID_TEMP,800,48);
         AddButton(hwnd,L"Тест записи",ID_BENCH,958,48);
         AddButton(hwnd,L"Сохранить отчёт",ID_SAVE,10,86);
+        PCPMAds::InitGraphics();
         PCPMAds::Refresh();
         AddButton(hwnd,PCPMAds::Label().c_str(),ID_AD_BANNER,10,126,1110);
         g_output=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"PC Performance Monitor C++ x64\r\nВыберите модуль сверху.",
@@ -1302,6 +1304,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DESTROY:
         KillTimer(hwnd, 1);
         KillTimer(hwnd, 2);
+        PCPMAds::Shutdown();
         SessionLog(L"MAIN_WINDOW_DESTROYED");
         EndSessionLog();
         PostQuitMessage(0); return 0;
@@ -1324,7 +1327,7 @@ int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int) {
         MessageBoxW(nullptr,L"Не удалось зарегистрировать окно. См. startup.log",L"PC Performance Monitor",MB_OK|MB_ICONERROR); return (int)e;
     }
     StartupLog(L"window class registered");
-    HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.4.1",
+    HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.4.2",
         WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1180,820,nullptr,nullptr,hInst,nullptr);
     if(!hwnd) {
         DWORD e=GetLastError(); StartupLog(L"CreateWindowExW failed",e);
