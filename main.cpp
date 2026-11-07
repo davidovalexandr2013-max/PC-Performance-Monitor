@@ -633,20 +633,24 @@ static std::vector<StartupEntry> EnumerateStartupEntries() {
     for (const auto& root : roots) for (const auto* path : paths) {
         HKEY key{};
         if (RegOpenKeyExW(root.key,path,0,KEY_READ|root.view,&key)!=ERROR_SUCCESS) continue;
-        for (DWORD i=0;;++i) {
-            DWORD nameLen=0, dataLen=0, type=0;
-            LONG rc=RegEnumValueW(key,i,nullptr,&nameLen,nullptr,&type,nullptr,&dataLen);
-            if (rc==ERROR_NO_MORE_ITEMS) break;
-            if (rc!=ERROR_SUCCESS && rc!=ERROR_MORE_DATA) continue;
-            std::vector<wchar_t> name(nameLen+2), data((dataLen/sizeof(wchar_t))+4);
-            DWORD nc=(DWORD)name.size(), dc=(DWORD)(data.size()*sizeof(wchar_t));
-            rc=RegEnumValueW(key,i,name.data(),&nc,nullptr,&type,
-                reinterpret_cast<BYTE*>(data.data()),&dc);
+        DWORD valueCount=0,maxName=0,maxData=0;
+        if (RegQueryInfoKeyW(key,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
+            &valueCount,&maxName,&maxData,nullptr,nullptr)!=ERROR_SUCCESS) {
+            RegCloseKey(key); continue;
+        }
+        std::vector<wchar_t> name((size_t)maxName+2);
+        std::vector<BYTE> data((size_t)maxData+sizeof(wchar_t)+2);
+        for (DWORD i=0;i<valueCount;++i) {
+            DWORD nameLen=(DWORD)name.size(), dataLen=(DWORD)data.size(), type=0;
+            LONG rc=RegEnumValueW(key,i,name.data(),&nameLen,nullptr,&type,
+                data.data(),&dataLen);
             if (rc!=ERROR_SUCCESS || (type!=REG_SZ && type!=REG_EXPAND_SZ)) continue;
             StartupEntry e;
             e.hive=root.key; e.hiveName=root.name; e.subkey=path;
-            e.valueName.assign(name.data(),nc);
-            e.command.assign(data.data());
+            e.valueName.assign(name.data(),nameLen);
+            e.command.assign(reinterpret_cast<const wchar_t*>(data.data()),
+                dataLen/sizeof(wchar_t));
+            while (!e.command.empty() && e.command.back()==L'\\0') e.command.pop_back();
             e.view=root.view;
             entries.push_back(std::move(e));
         }
