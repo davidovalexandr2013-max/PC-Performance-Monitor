@@ -39,5 +39,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PC-Performance-Monitor-v1.3.8-Windows-x64
-          path: build/Release/PC_Performance_Monitor_x64.exe
+          path: build/Release/PC_Performance_Monitor_v1_3_8_x64.exe
           if-no-files-found: error
