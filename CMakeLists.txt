@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 # Session logging enabled: temporary process/activity journal is removed on normal shutdown.
-project(PC_Performance_Monitor_CPP_x64 VERSION 1.3.8 LANGUAGES CXX)
+project(PC_Performance_Monitor_CPP_x64 VERSION 1.3.9 LANGUAGES CXX)
 
 if(NOT WIN32)
   message(FATAL_ERROR "This project is Windows-only.")
@@ -10,7 +10,7 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 
 add_executable(PC_Performance_Monitor_x64 WIN32 main.cpp)
-set_target_properties(PC_Performance_Monitor_x64 PROPERTIES OUTPUT_NAME "PC_Performance_Monitor_v1_3_8_x64")
+set_target_properties(PC_Performance_Monitor_x64 PROPERTIES OUTPUT_NAME "PC_Performance_Monitor_v1_3_9_x64")
 target_compile_features(PC_Performance_Monitor_x64 PRIVATE cxx_std_17)
 target_compile_definitions(PC_Performance_Monitor_x64 PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
 target_link_libraries(PC_Performance_Monitor_x64 PRIVATE
