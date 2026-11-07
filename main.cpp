@@ -1153,7 +1153,7 @@ static std::wstring BuildFullReport() {
     std::wstringstream report;
     report << L"PC PERFORMANCE MONITOR — ПОЛНЫЙ ОТЧЁТ\r\n";
     report << L"Дата формирования: " << Timestamp() << L"\r\n";
-    report << L"Версия: 1.4.0 x64\r\n";
+    report << L"Версия: 1.4.1 x64\r\n";
     report << L"Запись активности начата автоматически при запуске программы. Интервал снимка процессов: 10 секунд. Запись останавливается при закрытии программы.\r\n";
     report << L"\r\n========== 1. ОБОРУДОВАНИЕ И ОПЕРАТИВНАЯ ПАМЯТЬ ==========\r\n" << HardwareReport();
     report << L"\r\n========== 2. ПРОЦЕССЫ И РАСХОД ОЗУ ==========\r\n" << ProcessReport();
@@ -1324,7 +1324,7 @@ int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int) {
         MessageBoxW(nullptr,L"Не удалось зарегистрировать окно. См. startup.log",L"PC Performance Monitor",MB_OK|MB_ICONERROR); return (int)e;
     }
     StartupLog(L"window class registered");
-    HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.4.0",
+    HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.4.1",
         WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1180,820,nullptr,nullptr,hInst,nullptr);
     if(!hwnd) {
         DWORD e=GetLastError(); StartupLog(L"CreateWindowExW failed",e);
