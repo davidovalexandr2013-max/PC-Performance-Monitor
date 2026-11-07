@@ -1,0 +1,43 @@
+name: Windows x64 build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/windows-x64-v1.3.5
+    paths:
+      - "main.cpp"
+      - "CMakeLists.txt"
+      - ".github/workflows/windows-x64.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure x64
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          $exe = "build/Release/PC_Performance_Monitor_x64.exe"
+          if (!(Test-Path $exe)) { throw "Executable was not produced: $exe" }
+          $item = Get-Item $exe
+          Write-Host "EXE size: $($item.Length) bytes"
+          if ($item.Length -lt 10000) { throw "Executable size is unexpectedly small." }
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PC-Performance-Monitor-Windows-x64
+          path: build/Release/PC_Performance_Monitor_x64.exe
+          if-no-files-found: error
