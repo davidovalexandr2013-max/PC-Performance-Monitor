@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
+# Session logging enabled: temporary process/activity journal is removed on normal shutdown.
 project(PC_Performance_Monitor_CPP_x64 VERSION 1.3.8 LANGUAGES CXX)
 
 if(NOT WIN32)
