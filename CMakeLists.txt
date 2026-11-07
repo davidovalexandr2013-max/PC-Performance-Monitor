@@ -1,0 +1,19 @@
+cmake_minimum_required(VERSION 3.20)
+project(PC_Performance_Monitor_CPP_x64 VERSION 1.3.5 LANGUAGES CXX)
+
+if(NOT WIN32)
+  message(FATAL_ERROR "This project is Windows-only.")
+endif()
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+  message(FATAL_ERROR "x64 build required. Configure with -A x64.")
+endif()
+
+add_executable(PC_Performance_Monitor_x64 WIN32 main.cpp)
+target_compile_features(PC_Performance_Monitor_x64 PRIVATE cxx_std_17)
+target_compile_definitions(PC_Performance_Monitor_x64 PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+target_link_libraries(PC_Performance_Monitor_x64 PRIVATE
+  Comctl32 Comdlg32 Wbemuuid Wevtapi Advapi32 Shell32 Ole32 OleAut32 Psapi)
+if(MSVC)
+  target_compile_options(PC_Performance_Monitor_x64 PRIVATE /W4 /permissive- /EHsc /utf-8)
+  target_link_options(PC_Performance_Monitor_x64 PRIVATE /MACHINE:X64)
+endif()
