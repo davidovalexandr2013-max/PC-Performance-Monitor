@@ -135,7 +135,24 @@ static void CaptureProcessActivity() {
     g_lastProcesses.swap(current);
     if (++g_sessionSnapshotCounter % 5 == 0) {
         MEMORYSTATUSEX m{}; m.dwLength = sizeof(m);
-        if (GlobalMemoryStatusEx(&m)) SessionLog(L"PROCESS_SNAPSHOT | running=" + std::to_wstring(g_lastProcesses.size()) + L" | RAM_load=" + std::to_wstring(m.dwMemoryLoad) + L"%");
+        if (GlobalMemoryStatusEx(&m)) {
+            SessionLog(L"PROCESS_SNAPSHOT | running=" + std::to_wstring(g_lastProcesses.size()) +
+                L" | RAM_load=" + std::to_wstring(m.dwMemoryLoad) + L"% | RAM_used_MB=" +
+                std::to_wstring((m.ullTotalPhys-m.ullAvailPhys)/1048576ull) +
+                L" | RAM_total_MB=" + std::to_wstring(m.ullTotalPhys/1048576ull));
+        }
+        // Снимок расхода памяти по каждому процессу каждые 10 секунд.
+        for (const auto& item : g_lastProcesses) {
+            HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|PROCESS_VM_READ,FALSE,item.first);
+            if(!process) continue;
+            PROCESS_MEMORY_COUNTERS_EX mem{}; mem.cb=sizeof(mem);
+            if(GetProcessMemoryInfo(process,reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&mem),sizeof(mem))) {
+                SessionLog(L"PROCESS_MEMORY | PID=" + std::to_wstring(item.first) + L" | " + item.second +
+                    L" | WorkingSet_MB=" + std::to_wstring(mem.WorkingSetSize/1048576ull) +
+                    L" | Private_MB=" + std::to_wstring(mem.PrivateUsage/1048576ull));
+            }
+            CloseHandle(process);
+        }
     }
 }
 static void EndSessionLog() {
@@ -1059,6 +1076,11 @@ static void ShowResult(std::wstring* p) {
     if (g_window && !g_closing) {
         SetWindowTextW(g_output, p->c_str());
         SetStatus(L"Готово");
+        if (p->rfind(L"ОТЧЁТ УСПЕШНО СОЗДАН",0)==0) {
+            MessageBoxW(g_window,p->c_str(),L"PC Performance Monitor — отчёт сохранён",MB_OK|MB_ICONINFORMATION);
+        } else if (p->rfind(L"ОШИБКА:",0)==0) {
+            MessageBoxW(g_window,p->c_str(),L"PC Performance Monitor — ошибка отчёта",MB_OK|MB_ICONERROR);
+        }
     }
     delete p;
 }
@@ -1127,7 +1149,8 @@ static std::wstring BuildFullReport() {
     std::wstringstream report;
     report << L"PC PERFORMANCE MONITOR — ПОЛНЫЙ ОТЧЁТ\r\n";
     report << L"Дата формирования: " << Timestamp() << L"\r\n";
-    report << L"Версия: 1.3.9 x64\r\n";
+    report << L"Версия: 1.4.0 x64\r\n";
+    report << L"Запись активности начата автоматически при запуске программы. Интервал снимка процессов: 10 секунд. Запись останавливается при закрытии программы.\r\n";
     report << L"\r\n========== 1. ОБОРУДОВАНИЕ И ОПЕРАТИВНАЯ ПАМЯТЬ ==========\r\n" << HardwareReport();
     report << L"\r\n========== 2. ПРОЦЕССЫ И РАСХОД ОЗУ ==========\r\n" << ProcessReport();
     report << L"\r\n========== 3. СЛУЖБЫ WINDOWS ==========\r\n" << ServicesReport();
@@ -1291,7 +1314,7 @@ int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int) {
         MessageBoxW(nullptr,L"Не удалось зарегистрировать окно. См. startup.log",L"PC Performance Monitor",MB_OK|MB_ICONERROR); return (int)e;
     }
     StartupLog(L"window class registered");
-    HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.3.8",
+    HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.4.0",
         WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1180,820,nullptr,nullptr,hInst,nullptr);
     if(!hwnd) {
         DWORD e=GetLastError(); StartupLog(L"CreateWindowExW failed",e);
