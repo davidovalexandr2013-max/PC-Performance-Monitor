@@ -1098,7 +1098,19 @@ static void SaveReport() {
     ofn.lpstrFile=file; ofn.nMaxFile=MAX_PATH; ofn.Flags=OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST; ofn.lpstrDefExt=L"txt";
     if(GetSaveFileNameW(&ofn)) {
         int n=GetWindowTextLengthW(g_output); std::wstring s(n+1,L'\0'); GetWindowTextW(g_output,s.data(),n+1); s.resize(n);
-        std::wofstream f(file); if(f) f<<s; SetStatus(L"Отчёт сохранён");
+        std::wofstream f(file);
+        if(f) {
+            f << s << L"\r\n\r\n=== АВТОМАТИЧЕСКИЙ ЖУРНАЛ ТЕКУЩЕГО СЕАНСА ===\r\n";
+            std::lock_guard<std::mutex> lock(g_sessionMutex);
+            std::wifstream log(g_sessionLogPath);
+            if(log) f << log.rdbuf();
+            else f << L"Журнал текущего сеанса недоступен.\r\n";
+            SetStatus(L"Отчёт и журнал сеанса сохранены");
+            SessionLog(L"REPORT_SAVED | " + std::wstring(file));
+        } else {
+            SetStatus(L"Не удалось сохранить отчёт");
+            SessionLog(L"REPORT_SAVE_ERROR | " + std::to_wstring(GetLastError()));
+        }
     }
 }
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
