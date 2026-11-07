@@ -937,7 +937,7 @@ int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int nCmdShow) {
     WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=hInst; wc.lpszClassName=L"PCPM_CPP_X64";
     wc.hCursor=LoadCursor(nullptr,IDC_ARROW); wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
     RegisterClassW(&wc);
-    HWND hwnd=CreateWindowW(wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.3.7",
+    HWND hwnd=CreateWindowW(wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.3.8",
         WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,1160,790,nullptr,nullptr,hInst,nullptr);
     if(!hwnd) return 1;
     ShowWindow(hwnd,nCmdShow); UpdateWindow(hwnd);
