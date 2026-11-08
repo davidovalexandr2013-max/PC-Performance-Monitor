@@ -28,18 +28,53 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Verify executable
+      - name: Download and package Smartmontools 7.5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Join-Path $env:RUNNER_TEMP "smartmontools-7.5.win32-setup.exe"
+          $url = "https://github.com/smartmontools/smartmontools/releases/download/RELEASE_7_5/smartmontools-7.5.win32-setup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $expected = "896337fcc253220614cf8cdbd5cf2321c5aa326a37a04160a672a281e6104c70"
+          $actual = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Smartmontools installer SHA256 mismatch: $actual" }
+
+          $installDir = Join-Path $env:RUNNER_TEMP "smartmontools-install"
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          $process = Start-Process -FilePath $installer -ArgumentList @("/S", "/D=$installDir") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Smartmontools installer failed: $($process.ExitCode)" }
+
+          $smartctl = Get-ChildItem -Path $installDir -Filter "smartctl.exe" -File -Recurse | Select-Object -First 1
+          if (!$smartctl) { throw "smartctl.exe was not found in the Smartmontools installation." }
+          $driveDb = Get-ChildItem -Path $installDir -Filter "drivedb.h" -File -Recurse | Select-Object -First 1
+          if (!$driveDb) { throw "Smartmontools drive database drivedb.h is missing." }
+
+          $packageDir = "build/Release/smartmontools"
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item -Path (Join-Path $installDir "*") -Destination $packageDir -Recurse -Force
+          $packagedSmartctl = Get-ChildItem -Path $packageDir -Filter "smartctl.exe" -File -Recurse | Select-Object -First 1
+          if (!$packagedSmartctl) { throw "smartctl.exe was not copied to the release package." }
+          & $packagedSmartctl.FullName --version
+          if ($LASTEXITCODE -ne 0) { throw "Packaged smartctl.exe did not start successfully." }
+          Write-Host "Packaged Smartmontools from: $($packagedSmartctl.FullName)"
+
+      - name: Verify executable and package sizes
         shell: pwsh
         run: |
           $exe = "build/Release/PC_Performance_Monitor_v1_4_2_x64.exe"
           if (!(Test-Path $exe)) { throw "Executable was not produced: $exe" }
           $item = Get-Item $exe
-          Write-Host "EXE size: $($item.Length) bytes"
+          Write-Host ("EXE size: {0:N2} MB" -f ($item.Length / 1MB))
           if ($item.Length -lt 10000) { throw "Executable size is unexpectedly small." }
+          $package = Get-ChildItem "build/Release" -Recurse -File | Measure-Object -Property Length -Sum
+          Write-Host ("Total release package size: {0:N2} MB" -f ($package.Sum / 1MB))
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: PC-Performance-Monitor-v1.4.2-Windows-x64
-          path: build/Release/*.exe
+          path: |
+            build/Release/PC_Performance_Monitor_v1_4_2_x64.exe
+            build/Release/PC_Performance_Monitor_AdServer_x64.exe
+            build/Release/smartmontools/**
           if-no-files-found: error
