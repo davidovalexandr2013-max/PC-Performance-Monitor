@@ -1222,44 +1222,47 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         SessionLog(L"MAIN_WINDOW_CREATED");
         CaptureProcessActivity();
         PCPMAds::InitGraphics(); PCPMAds::Refresh();
-        AddButton(hwnd,L"Главная",ID_HARDWARE,10,10,150);
-        AddButton(hwnd,L"Процессы",ID_PROCESSES,168,10,150);
-        AddButton(hwnd,L"Службы",ID_SERVICES,326,10,150);
-        AddButton(hwnd,L"Диски и SMART",ID_SMART,484,10,170);
-        AddButton(hwnd,L"Память (ОЗУ)",ID_RAM,662,10,170);
-        AddButton(hwnd,L"Аппаратные ошибки",ID_DIAG,840,10,190);
-        AddButton(hwnd,L"Временные файлы",ID_TEMP,1038,10,170);
-        AddButton(hwnd,L"Отчёт",ID_SAVE,1216,10,130);
-        AddButton(hwnd,L"Реклама",ID_AD_BANNER,1354,10,150);
-        AddButton(hwnd,L"Общая информация",ID_HARDWARE,10,52,210);
-        AddButton(hwnd,L"Процессы и ресурсы",ID_PROCESSES,10,90,210);
-        AddButton(hwnd,L"Службы Windows",ID_SERVICES,10,128,210);
-        AddButton(hwnd,L"Накопители SMART",ID_SMART,10,166,210);
-        AddButton(hwnd,L"Оперативная память",ID_RAM,10,204,210);
-        AddButton(hwnd,L"Аппаратные ошибки",ID_DIAG,10,242,210);
-        AddButton(hwnd,L"Временные файлы",ID_TEMP,10,280,210);
-        AddButton(hwnd,L"Автозагрузка",ID_STARTUP,10,318,210);
-        AddButton(hwnd,L"Ресурс SSD",ID_TBW,10,356,210);
-        AddButton(hwnd,L"Быстрая проверка диска",ID_TEST_SHORT,10,394,210);
-        AddButton(hwnd,L"Полная проверка диска",ID_TEST_LONG,10,432,210);
-        AddButton(hwnd,L"Отмена проверки",ID_CANCEL_TEST,10,470,210);
-        AddButton(hwnd,L"Тест скорости диска",ID_BENCH,10,508,210);
-        AddButton(hwnd,L"Сохранить полный отчёт",ID_SAVE,10,546,210);
-        AddButton(hwnd,PCPMAds::Label().c_str(),ID_AD_BANNER,10,610,210);
-        g_output=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"Отчёты и результаты диагностики будут отображаться здесь.",WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY|ES_NOHIDESEL,240,680,1270,245,hwnd,(HMENU)200,g_instance,nullptr);
-        g_status=CreateWindowW(L"STATIC",L"Фоновый мониторинг активен",WS_CHILD|WS_VISIBLE,10,950,1500,26,hwnd,(HMENU)201,g_instance,nullptr);
+        PCPMAds::InitGraphics(); PCPMAds::Refresh();
+        AddButton(hwnd,L"⌂ Главная",ID_HARDWARE,82,48,173); AddButton(hwnd,L"▣ Процессы",ID_PROCESSES,264,48,146);
+        AddButton(hwnd,L"⚙ Службы",ID_SERVICES,419,48,130); AddButton(hwnd,L"◉ Диски и SMART",ID_SMART,558,48,176);
+        AddButton(hwnd,L"▦ ОЗУ (DDR)",ID_RAM,743,48,134); AddButton(hwnd,L"⚠ Ошибки",ID_DIAG,886,48,162);
+        AddButton(hwnd,L"▤ Временные файлы",ID_TEMP,1057,48,190); AddButton(hwnd,L"▧ Отчёт",ID_SAVE,1256,48,132);
+        AddButton(hwnd,L"⚙ Настройки",ID_AD_BANNER,1397,48,130);
+        AddButton(hwnd,L"Общая информация",ID_HARDWARE,12,113,248); AddButton(hwnd,L"Процессы и ресурсы",ID_PROCESSES,12,172,248);
+        AddButton(hwnd,L"Службы Windows",ID_SERVICES,12,231,248); AddButton(hwnd,L"Диски и SMART",ID_SMART,12,290,248);
+        AddButton(hwnd,L"ОЗУ (DDR)",ID_RAM,12,349,248); AddButton(hwnd,L"Аппаратные ошибки",ID_DIAG,12,408,248);
+        AddButton(hwnd,L"Временные файлы",ID_TEMP,12,467,248); AddButton(hwnd,L"Очистка и ускорение",ID_TEMP,12,526,248);
+        AddButton(hwnd,L"Мониторинг",ID_HARDWARE,12,585,248); AddButton(hwnd,L"Быстрая проверка диска",ID_TEST_SHORT,12,644,248);
+        AddButton(hwnd,L"Полная проверка диска",ID_TEST_LONG,12,703,248); AddButton(hwnd,L"Отмена проверки",ID_CANCEL_TEST,12,762,248);
+        AddButton(hwnd,PCPMAds::Label().c_str(),ID_AD_BANNER,12,838,248);
+        g_output=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"Выберите раздел для просмотра подробных данных. Главная панель показывает текущие показатели компьютера.",WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY|ES_NOHIDESEL,280,865,1240,105,hwnd,(HMENU)200,g_instance,nullptr);
+        g_status=CreateWindowW(L"STATIC",L"● Мониторинг: работает (фоновый режим)  •  Интернет: проверяется",WS_CHILD|WS_VISIBLE,12,984,1500,26,hwnd,(HMENU)201,g_instance,nullptr);
         return 0;
     }
     case WM_ERASEBKGND: { RECT r{};GetClientRect(hwnd,&r);HBRUSH b=CreateSolidBrush(RGB(3,13,29));FillRect((HDC)wp,&r,b);DeleteObject(b);return 1; }
     case WM_PAINT: {
-        PAINTSTRUCT ps{};HDC dc=BeginPaint(hwnd,&ps);RECT r{};GetClientRect(hwnd,&r);HBRUSH bg=CreateSolidBrush(RGB(3,13,29));FillRect(dc,&r,bg);DeleteObject(bg);
-        DashText(dc,245,55,L"Состояние компьютера",23,RGB(245,250,255),true);DashText(dc,245,88,DashboardStats().c_str(),16,RGB(80,235,160),true);
-        DashPanel(dc,240,122,400,185,L"Загрузка ресурсов");DashPanel(dc,650,122,420,185,L"Оперативная память");DashPanel(dc,1080,122,430,185,L"Накопитель C:");
-        MEMORYSTATUSEX m{};m.dwLength=sizeof(m);GlobalMemoryStatusEx(&m);wchar_t line[256]{};swprintf_s(line,L"Используется: %.2f ГБ из %.2f ГБ (%lu%%)",(m.ullTotalPhys-m.ullAvailPhys)/1073741824.0,m.ullTotalPhys/1073741824.0,m.dwMemoryLoad);DashText(dc,670,165,line,18,RGB(65,220,255),true);swprintf_s(line,L"Доступно: %.2f ГБ",m.ullAvailPhys/1073741824.0);DashText(dc,670,205,line,16);
-        ULARGE_INTEGER f{},t{};if(GetDiskFreeSpaceExW(L"C:\\",&f,&t,nullptr)){swprintf_s(line,L"Всего: %.2f ГБ",t.QuadPart/1e9);DashText(dc,1100,165,line,18);swprintf_s(line,L"Свободно: %.2f ГБ",f.QuadPart/1e9);DashText(dc,1100,205,line,17,RGB(100,235,160),true);}
-        DashPanel(dc,240,322,620,330,L"Куда расходуется оперативная память");DashPanel(dc,870,322,640,330,L"Сводка и рекомендации");
-        DashText(dc,260,365,DashboardStats().c_str(),15);DashText(dc,260,405,L"Подробная таблица процессов и потребления ОЗУ — в разделе «Процессы и ресурсы».",15);
-        DashText(dc,890,365,L"Фоновый мониторинг: активен",17,RGB(100,235,160),true);DashText(dc,890,402,L"Контроль процессов, служб, SMART и системных событий.",15);DashText(dc,890,440,L"Рекомендации строятся по фактическим данным ПК.",15);
+        PAINTSTRUCT ps{}; HDC dc=BeginPaint(hwnd,&ps); RECT cr{}; GetClientRect(hwnd,&cr);
+        HBRUSH bg=CreateSolidBrush(RGB(2,12,29));FillRect(dc,&cr,bg);DeleteObject(bg);
+        HBRUSH head=CreateSolidBrush(RGB(4,34,76));RECT hr{0,0,1536,100};FillRect(dc,&hr,head);DeleteObject(head);
+        DashText(dc,18,8,L"◉",43,RGB(45,205,255),true);DashText(dc,98,6,L"PC Performance Monitor  v2.1.0 x64",27,RGB(255,255,255),true);
+        DashText(dc,608,16,L"Диагностика  •  Мониторинг  •  Оптимизация  •  Очистка  •  Ускорение ПК",17,RGB(230,240,255),true);
+        DashText(dc,282,112,L"Состояние компьютера:",24,RGB(250,250,255),true);DashText(dc,578,112,L"Показатели обновляются по данным Windows",18,RGB(65,235,120),true);
+        DashPanel(dc,280,151,845,66,L"Сводка системы");DashText(dc,300,184,DashboardStats().c_str(),16,RGB(225,245,255),true);
+        DashPanel(dc,1140,108,386,248,L"Оборудование и носители");
+        MEMORYSTATUSEX m{};m.dwLength=sizeof(m);GlobalMemoryStatusEx(&m);wchar_t line[256]{};
+        swprintf_s(line,L"ОЗУ: %.2f ГБ занято из %.2f ГБ (%lu%%)",(m.ullTotalPhys-m.ullAvailPhys)/1073741824.0,m.ullTotalPhys/1073741824.0,m.dwMemoryLoad);DashText(dc,1160,151,line,17,RGB(65,220,255),true);
+        swprintf_s(line,L"Доступно: %.2f ГБ",m.ullAvailPhys/1073741824.0);DashText(dc,1160,183,line,16);
+        ULARGE_INTEGER f{},t{};if(GetDiskFreeSpaceExW(L"C:\\",&f,&t,nullptr)){swprintf_s(line,L"Диск C: %.2f ГБ",(double)t.QuadPart/1e9);DashText(dc,1160,224,line,17);swprintf_s(line,L"Свободно: %.2f ГБ",(double)f.QuadPart/1e9);DashText(dc,1160,256,line,16,RGB(90,235,130),true);}
+        DashPanel(dc,280,228,265,112,L"Процессор");DashPanel(dc,555,228,265,112,L"Оперативная память");DashPanel(dc,830,228,295,112,L"Системный диск");
+        DashText(dc,300,276,L"Текущая загрузка",15,RGB(90,230,150),true);DashText(dc,575,276,L"Использование ОЗУ",15,RGB(75,220,255));DashText(dc,850,276,L"SMART / NVMe",16,RGB(255,210,70),true);
+        DashPanel(dc,280,352,540,205,L"Сведения о системе");DashPanel(dc,830,352,295,205,L"Рекомендации");
+        DashText(dc,300,394,L"Оборудование, память DDR и характеристики —",15);DashText(dc,300,422,L"в разделах «Общая информация» и «ОЗУ (DDR)».",15);DashText(dc,300,461,L"Подробная диагностика накопителей — в SMART.",15);
+        DashText(dc,850,394,L"Проверить временные файлы",15,RGB(255,220,70),true);DashText(dc,850,426,L"Посмотреть службы Windows",15);DashText(dc,850,458,L"Проверить системные ошибки",15);
+        DashPanel(dc,280,568,540,270,L"Куда расходуется ОЗУ");DashPanel(dc,830,568,295,270,L"Фоновый анализ");
+        DashText(dc,300,610,L"Суммарно занято Windows и приложениями:",15);swprintf_s(line,L"%.2f ГБ из %.2f ГБ",(m.ullTotalPhys-m.ullAvailPhys)/1073741824.0,m.ullTotalPhys/1073741824.0);DashText(dc,300,641,line,23,RGB(70,225,255),true);
+        DashText(dc,300,691,L"Разбивка по процессам — в разделе",15);DashText(dc,300,718,L"«Процессы и ресурсы», сортировка по ОЗУ.",15);
+        DashText(dc,850,610,L"Мониторинг процессов",15,RGB(100,235,120),true);DashText(dc,850,641,L"Контроль системных служб",15,RGB(100,235,120),true);DashText(dc,850,672,L"Анализ SMART и событий Windows",15,RGB(100,235,120),true);DashText(dc,850,703,L"Проверка временных файлов",15,RGB(100,235,120),true);
+        DashPanel(dc,1140,370,386,468,L"Состояние служб и дисков");DashText(dc,1160,416,L"Службы и рекомендации — в разделе",15);DashText(dc,1160,447,L"«Службы Windows».",15);DashText(dc,1160,500,L"SMART и NVMe Health Log",16,RGB(80,220,255),true);DashText(dc,1160,531,L"в разделе «Диски и SMART».",15);DashText(dc,1160,600,L"Временные файлы и их объём",16);DashText(dc,1160,631,L"в разделе «Временные файлы».",15);
         EndPaint(hwnd,&ps);return 0;
     }
     case WM_DRAWITEM: {
@@ -1275,7 +1278,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HDC dc=(HDC)wp; SetTextColor(dc,RGB(220,235,250)); SetBkColor(dc,RGB(20,31,52));
         static HBRUSH b=CreateSolidBrush(RGB(20,31,52)); return (LRESULT)b;
     }
-    case WM_SIZE: { if(g_output)MoveWindow(g_output,240,680,LOWORD(lp)-265,HIWORD(lp)-760,TRUE);if(g_status)MoveWindow(g_status,10,HIWORD(lp)-32,LOWORD(lp)-20,24,TRUE);InvalidateRect(hwnd,nullptr,FALSE);return 0; }
+    case WM_SIZE: { int w=LOWORD(lp),h=HIWORD(lp);if(g_output)MoveWindow(g_output,280,865,(std::max)(300,w-296),(std::max)(60,h-919),TRUE);if(g_status)MoveWindow(g_status,12,h-30,(std::max)(300,w-24),24,TRUE);InvalidateRect(hwnd,nullptr,FALSE);return 0; }
     case WM_TIMER:
         if (wp == 1 && !g_closing) CaptureProcessActivity();
         if (wp == 2 && !g_closing) { PCPMAds::Rotate(); if (++g_adRefreshTicks >= 6) { g_adRefreshTicks=0; PCPMAds::Refresh(); } HWND ad=GetDlgItem(hwnd,ID_AD_BANNER); if(ad) SetWindowTextW(ad,PCPMAds::Label().c_str()); }
@@ -1355,7 +1358,7 @@ int WINAPI wWinMain(HINSTANCE hInst,HINSTANCE, PWSTR,int) {
     }
     StartupLog(L"window class registered");
     HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"PC Performance Monitor — C++ x64 v1.4.2",
-        WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1180,820,nullptr,nullptr,hInst,nullptr);
+        WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1560,1060,nullptr,nullptr,hInst,nullptr);
     if(!hwnd) {
         DWORD e=GetLastError(); StartupLog(L"CreateWindowExW failed",e);
         MessageBoxW(nullptr,L"Не удалось создать окно. См. %LOCALAPPDATA%\\PCPerformanceMonitor\\startup.log",L"PC Performance Monitor",MB_OK|MB_ICONERROR); return (int)e;
