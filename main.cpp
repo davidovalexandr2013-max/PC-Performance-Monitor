@@ -78,7 +78,7 @@ static std::wstring ResolveSmartctlPath() {
     DWORD n = GetModuleFileNameW(nullptr, module, MAX_PATH);
     if (n && n < MAX_PATH) {
         fs::path dir = fs::path(module).parent_path();
-        const fs::path candidates[] = { dir / L"smartctl.exe", dir / L"smartmontools" / L"smartctl.exe" };
+        const fs::path candidates[] = { dir / L"smartctl.exe", dir / L"smartmontools" / L"smartctl.exe", dir / L"smartmontools" / L"bin" / L"smartctl.exe" };
         for (const auto& candidate : candidates) {
             std::error_code ec;
             if (fs::is_regular_file(candidate, ec) && !ec) return candidate.wstring();
@@ -439,6 +439,8 @@ static std::wstring SmartReport() {
         report += L"smartctl.exe не найден. Поместите его рядом с программой, в папку smartmontools или добавьте в PATH.\r\n";
         return report;
     }
+    report += L"Исполняемый файл: " + SmartctlPath() + L"\r\n";
+    report += L"Версия Smartmontools:\r\n" + RunCapture(L"\"" + SmartctlPath() + L"\" --version", 15000);
     report += RunCapture(L"\"" + SmartctlPath() + L"\" --scan-open", 30000);
     auto devices = SmartctlDevices();
     if (devices.empty()) {
