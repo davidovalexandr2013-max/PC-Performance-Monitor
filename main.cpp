@@ -1196,8 +1196,8 @@ static void StartTask(const std::wstring& name, std::function<std::wstring()> fn
         }
     }).detach();
 }
-static void AddButton(HWND parent, const wchar_t* label, int id, int x, int y, int w=150) {
-    CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,x,y,w,32,parent,(HMENU)(INT_PTR)id,g_instance,nullptr);
+static void AddButton(HWND parent, const wchar_t* label, int id, int x, int y, int w=150, int h=32) {
+     CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,x,y,w,h,parent,(HMENU)(INT_PTR)id,g_instance,nullptr);
 }
 enum { ID_HARDWARE=100, ID_SMART, ID_TEST_STATUS, ID_TEST_SHORT, ID_TEST_LONG, ID_DISKS, ID_DIAG, ID_PROCESSES,
        ID_STARTUP, ID_RAM, ID_TBW, ID_TEMP, ID_BENCH, ID_SAVE, ID_CANCEL_TEST, ID_AD_BANNER, ID_SERVICES };
