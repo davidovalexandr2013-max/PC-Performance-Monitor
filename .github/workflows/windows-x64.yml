@@ -34,10 +34,25 @@ jobs:
           $ErrorActionPreference = "Stop"
           $installer = Join-Path $env:RUNNER_TEMP "smartmontools-7.5.win32-setup.exe"
           $url = "https://github.com/smartmontools/smartmontools/releases/download/RELEASE_7_5/smartmontools-7.5.win32-setup.exe"
-          Invoke-WebRequest -Uri $url -OutFile $installer
           $expected = "896337fcc253220614cf8cdbd5cf2321c5aa326a37a04160a672a281e6104c70"
-          $actual = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) { throw "Smartmontools installer SHA256 mismatch: $actual" }
+          $downloaded = $false
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            try {
+              if (Test-Path $installer) { Remove-Item $installer -Force }
+              Invoke-WebRequest -Uri $url -OutFile $installer -Headers @{ "User-Agent" = "PC-Performance-Monitor-CI"; "Accept" = "application/octet-stream" } -MaximumRedirection 10
+              $item = Get-Item $installer
+              if ($item.Length -lt 1000000) { throw "Downloaded response is too small ($($item.Length) bytes), likely an HTML error page." }
+              $actual = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($actual -ne $expected) { throw "Smartmontools installer SHA256 mismatch: $actual" }
+              $downloaded = $true
+              break
+            }
+            catch {
+              Write-Warning "Smartmontools download attempt $attempt failed: $($_.Exception.Message)"
+              if ($attempt -lt 5) { Start-Sleep -Seconds (5 * $attempt) }
+            }
+          }
+          if (!$downloaded) { throw "Could not download and verify the official Smartmontools 7.5 installer after 5 attempts." }
 
           $installDir = Join-Path $env:RUNNER_TEMP "smartmontools-install"
           New-Item -ItemType Directory -Force -Path $installDir | Out-Null
