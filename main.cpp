@@ -470,11 +470,24 @@ static std::wstring RunSmartTest(const wchar_t* option) {
     if (SmartctlPath().empty()) return L"smartctl.exe не найден. Поместите его рядом с программой или в папку smartmontools.\r\n";
     auto devices = SmartctlDevices();
     if (devices.empty()) return L"Устройства smartctl не обнаружены.\r\n";
-    std::wstring report;
+    std::wstring report = L"Выберите накопители по одному: «Да» — выполнить операцию, «Нет» — пропустить, «Отмена» — завершить выбор.\r\n";
+    unsigned selected = 0;
     for (const auto& device : devices) {
-        report += L"\r\n--- " + device.path + device.options + L" ---\r\n";
+        const std::wstring prompt = L"Выполнить SMART-команду для устройства " + device.path + device.options +
+            L"?\r\n\r\nКоманда: " + option +
+            L"\r\n\r\nУбедитесь, что выбран правильный накопитель.";
+        const int answer = MessageBoxW(g_window, prompt.c_str(), L"Выбор накопителя для SMART-теста",
+            MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON2);
+        if (answer == IDCANCEL) { report += L"\r\nВыбор остановлен пользователем.\r\n"; break; }
+        if (answer != IDYES) {
+            report += L"\r\nПропущено: " + device.path + L"\r\n";
+            continue;
+        }
+        ++selected;
+        report += L"\r\n--- Запуск для " + device.path + device.options + L" ---\r\n";
         report += RunCapture(SmartctlCommand(option, device), 120000);
     }
+    if (!selected) report += L"\r\nКоманда не запускалась: ни один накопитель не выбран.\r\n";
     return report;
 }
 
@@ -1353,17 +1366,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case ID_DISKS: StartTask(L"Список накопителей",DiskList); break;
         case ID_TEST_STATUS: StartTask(L"Статус SMART self-test",SmartTests); break;
         case ID_TEST_SHORT: {
-            if(MessageBoxW(hwnd,L"Запустить короткий SMART-тест на всех обнаруженных smartctl дисках? Команда зависит от поддержки накопителя.",L"Подтверждение",MB_YESNO|MB_ICONQUESTION)==IDYES)
+            if(MessageBoxW(hwnd,L"Выбрать накопители для короткого SMART-теста? Для каждого устройства будет отдельное подтверждение.",L"Подтверждение",MB_YESNO|MB_ICONQUESTION)==IDYES)
                 StartTask(L"SMART SHORT",[] { return RunSmartTest(L"-t short"); });
             break;
         }
         case ID_TEST_LONG: {
-            if(MessageBoxW(hwnd,L"Запустить длительный SMART-тест на всех обнаруженных smartctl дисках?",L"Подтверждение",MB_YESNO|MB_ICONWARNING)==IDYES)
+            if(MessageBoxW(hwnd,L"Выбрать накопители для длительного SMART-теста? Для каждого устройства будет отдельное подтверждение.",L"Подтверждение",MB_YESNO|MB_ICONWARNING)==IDYES)
                 StartTask(L"SMART LONG",[] { return RunSmartTest(L"-t long"); });
             break;
         }
         case ID_CANCEL_TEST:
-            if(MessageBoxW(hwnd,L"Отменить SMART self-test на всех обнаруженных smartctl устройствах?",L"Подтверждение",MB_YESNO|MB_ICONWARNING)==IDYES)
+            if(MessageBoxW(hwnd,L"Выбрать накопители, на которых требуется отменить SMART self-test?",L"Подтверждение",MB_YESNO|MB_ICONWARNING)==IDYES)
                 StartTask(L"Отмена SMART self-test",[] { return RunSmartTest(L"-X"); });
             break;
         case ID_DIAG: StartTask(L"Системные события",DiagnosticsReport); break;
