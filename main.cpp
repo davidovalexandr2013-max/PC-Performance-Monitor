@@ -32,6 +32,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
@@ -1439,9 +1440,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         swprintf_s(line,L"%.2f ГБ из %.2f ГБ  (%lu%%)",(m.ullTotalPhys-m.ullAvailPhys)/1073741824.0,m.ullTotalPhys/1073741824.0,m.dwMemoryLoad);
         DashText(dc,left+18,lowerY+68,line,19,blue,true);DashBar(dc,left+18,lowerY+100,graphW-36,15,ram,blue);
         DashPanel(dc,left+graphW+16,lowerY,graphW,lowerH,L"ЗАГРУЗКА РЕСУРСОВ");
-        DashText(dc,left+graphW+30,lowerY+43,L"ЦП",13,green,true);DashBar(dc,left+graphW+70,lowerY+44,graphW-100,cpu<0?0:cpu,green);
-        DashText(dc,left+graphW+30,lowerY+76,L"ОЗУ",13,blue,true);DashBar(dc,left+graphW+70,lowerY+77,graphW-100,ram,blue);
-        DashText(dc,left+graphW+30,lowerY+109,L"Диск",13,orange,true);DashBar(dc,left+graphW+70,lowerY+110,graphW-100,diskUsed<0?0:diskUsed,orange);
+        DashText(dc,left+graphW+30,lowerY+43,L"ЦП",13,green,true);DashBar(dc,left+graphW+70,lowerY+44,graphW-100,10,cpu<0?0:cpu,green);
+        DashText(dc,left+graphW+30,lowerY+76,L"ОЗУ",13,blue,true);DashBar(dc,left+graphW+70,lowerY+77,graphW-100,10,ram,blue);
+        DashText(dc,left+graphW+30,lowerY+109,L"Диск",13,orange,true);DashBar(dc,left+graphW+70,lowerY+110,graphW-100,10,diskUsed<0?0:diskUsed,orange);
         // Правая колонка: сведения о каждом томе и фактическая память.
         DashPanel(dc,rightX,108,350,280,L"ОБОРУДОВАНИЕ И НОСИТЕЛИ");
         DashDiskPanel(dc,rightX+18,151,310,L"C");
