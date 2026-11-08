@@ -615,7 +615,7 @@ static std::wstring TbwReport() {
 static std::wstring HResultText(HRESULT hr) {
     wchar_t b[32]{}; swprintf_s(b,L"0x%08X",(unsigned)hr); return b;
 }
-static std::wstring WmiQuery(const wchar_t* query, const wchar_t* property) {
+static std::wstring WmiQuery(const wchar_t* query, const wchar_t* property, const wchar_t* nameSpace = L"ROOT\\CIMV2") {
     HRESULT init=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     const bool uninit=(init==S_OK||init==S_FALSE);
     if(FAILED(init)&&init!=RPC_E_CHANGED_MODE)
@@ -623,7 +623,7 @@ static std::wstring WmiQuery(const wchar_t* query, const wchar_t* property) {
     IWbemLocator* loc=nullptr; IWbemServices* svc=nullptr; IEnumWbemClassObject* en=nullptr;
     std::wstringstream out; HRESULT hr=CoCreateInstance(CLSID_WbemLocator,nullptr,CLSCTX_INPROC_SERVER,IID_IWbemLocator,(void**)&loc);
     if(FAILED(hr)) { out<<L"[WMI: CoCreateInstance: "<<HResultText(hr)<<L"]\r\n"; if(uninit) CoUninitialize(); return out.str(); }
-    BSTR ns=SysAllocString(L"ROOT\\CIMV2");
+    BSTR ns=SysAllocString(nameSpace);
     hr=loc->ConnectServer(ns,nullptr,nullptr,nullptr,0,nullptr,nullptr,&svc); SysFreeString(ns);
     if(FAILED(hr)) { out<<L"[WMI: ConnectServer: "<<HResultText(hr)<<L"]\r\n"; loc->Release(); if(uninit) CoUninitialize(); return out.str(); }
     hr=CoSetProxyBlanket(svc,RPC_C_AUTHN_WINNT,RPC_C_AUTHZ_NONE,nullptr,RPC_C_AUTHN_LEVEL_CALL,RPC_C_IMP_LEVEL_IMPERSONATE,nullptr,EOAC_NONE);
@@ -683,7 +683,33 @@ static std::wstring HardwareReport() {
     ss<<L"Производитель: "<<WmiQuery(L"SELECT Manufacturer FROM Win32_PhysicalMemory",L"Manufacturer");
     ss<<L"Модель/Part Number: "<<WmiQuery(L"SELECT PartNumber FROM Win32_PhysicalMemory",L"PartNumber");
     ss<<L"Объём модуля (байт): "<<WmiQuery(L"SELECT Capacity FROM Win32_PhysicalMemory",L"Capacity");
-    ss<<L"Тип памяти (SMBIOS): "<<WmiQuery(L"SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory",L"SMBIOSMemoryType");
+    std::wstring smbiosType = WmiQuery(L"SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory",L"SMBIOSMemoryType");
+    auto ddrName = [](const std::wstring& raw) -> std::wstring {
+        std::wistringstream in(raw); std::wstring line, result;
+        while (std::getline(in, line)) {
+            while (!line.empty() && (line.back()==L'\\r' || line.back()==L' ')) line.pop_back();
+            if (line.empty()) continue;
+            std::wstring name = L"неизвестный тип SMBIOS (" + line + L")";
+            try {
+                const int code = std::stoi(line);
+                switch (code) {
+                    case 20: name=L"DDR"; break;
+                    case 21: name=L"DDR2"; break;
+                    case 24: name=L"DDR3"; break;
+                    case 26: name=L"DDR4"; break;
+                    case 34: name=L"DDR5"; break;
+                    case 30: name=L"LPDDR4"; break;
+                    case 35: name=L"LPDDR5"; break;
+                    default: break;
+                }
+            } catch (...) {}
+            if (!result.empty()) result += L"; ";
+            result += name;
+        }
+        return result.empty() ? L"не определено (SMBIOS не предоставил значение)" : result;
+    };
+    ss<<L"Поколение DDR (по SMBIOS): "<<ddrName(smbiosType)<<L"\r\n";
+    ss<<L"Код SMBIOSMemoryType: "<<smbiosType;
     ss<<L"Тип памяти (WMI): "<<WmiQuery(L"SELECT MemoryType FROM Win32_PhysicalMemory",L"MemoryType");
     ss<<L"Скорость (MT/s): "<<WmiQuery(L"SELECT Speed FROM Win32_PhysicalMemory",L"Speed");
     ss<<L"Настроенная скорость (MT/s): "<<WmiQuery(L"SELECT ConfiguredClockSpeed FROM Win32_PhysicalMemory",L"ConfiguredClockSpeed");
@@ -703,16 +729,18 @@ static std::wstring HardwareReport() {
     ss<<L"\r\n=== BIOS ===\r\n";
     ss<<WmiQuery(L"SELECT SMBIOSBIOSVersion FROM Win32_BIOS",L"SMBIOSBIOSVersion");
     ss<<L"\r\n=== ТЕМПЕРАТУРНЫЕ ЗОНЫ ACPI (если доступны) ===\r\n";
-    ss<<WmiQuery(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature",L"CurrentTemperature");
+    ss<<WmiQuery(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature",L"CurrentTemperature",L"ROOT\\WMI");
     ss<<L"Примечание: WMI/ACPI может не предоставлять температуры CPU/GPU на современных ПК. Если WMI недоступен, базовые сведения CPU и RAM всё равно выводятся через API Windows.\r\n";
     return ss.str();
 }
 
 static std::wstring EventReport(const wchar_t* channel, const wchar_t* label, DWORD maxEvents = 250) {
     std::wstringstream ss; ss << L"=== " << label << L" ===\r\n";
-    const wchar_t* xpath = (wcscmp(label, L"WHEA / аппаратные ошибки") == 0)
-        ? L"*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger']]]"
-        : L"*";
+    const wchar_t* xpath = L"*";
+    if (wcscmp(label, L"WHEA / аппаратные ошибки") == 0)
+        xpath = L"*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger']]]";
+    else if (wcscmp(label, L"Критические завершения Windows (общий журнал)") == 0)
+        xpath = L"*[System[(Level=1 or Level=2) and (Provider[@Name='Microsoft-Windows-Kernel-Power' or @Name='EventLog'])]]";
     EVT_HANDLE query = EvtQuery(nullptr, channel, xpath, EvtQueryChannelPath | EvtQueryReverseDirection);
     if (!query) { ss << L"Журнал недоступен (код " << GetLastError() << L").\r\n"; return ss.str(); }
     std::array<EVT_HANDLE, 32> events{}; DWORD returned = 0, total = 0;
