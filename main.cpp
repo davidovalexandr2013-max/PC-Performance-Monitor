@@ -424,6 +424,10 @@ static std::vector<SmartctlDevice> SmartctlDevices() {
         std::wstring token; bool validOptions = true;
         while (tokens >> token) { if (!safeSmartctlToken(token)) { validOptions = false; break; } item.options += L" " + token; }
         if (!validOptions) continue;
+        const std::wstring probe = RunCapture(L"\"" + executable + L"\"" + item.options + L" -i " + item.path, 20000);
+        const bool hasIdentity = probe.find(L"Device Model:") != std::wstring::npos || probe.find(L"Model Family:") != std::wstring::npos;
+        const bool smartAvailable = probe.find(L"SMART support is: Available") != std::wstring::npos || probe.find(L"SMART support is: Enabled") != std::wstring::npos;
+        if (!hasIdentity || !smartAvailable) continue;
         auto it = std::find_if(devices.begin(), devices.end(), [&](const SmartctlDevice& d) { return d.path == item.path; });
         if (it == devices.end()) devices.push_back(std::move(item));
         else if (it->options.empty()) it->options = item.options;
