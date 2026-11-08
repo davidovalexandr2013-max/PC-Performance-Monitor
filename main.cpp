@@ -434,6 +434,23 @@ static std::vector<SmartctlDevice> SmartctlDevices() {
     }
     return devices;
 }
+static std::wstring CleanWmiValues(const std::wstring& raw, bool vendorCode=false) {
+    std::wistringstream in(raw); std::wstring line,result; std::vector<std::wstring> seen;
+    while(std::getline(in,line)) {
+        while(!line.empty() && (line.back()==L'\r' || line.back()==L' ')) line.pop_back();
+        size_t first=line.find_first_not_of(L" \t"); if(first==std::wstring::npos) continue; line=line.substr(first);
+        if(std::find(seen.begin(),seen.end(),line)!=seen.end()) continue; seen.push_back(line);
+        std::wstring value=line;
+        if(line.rfind(L"0x",0)==0 && line.size()>2 && (line.size()-2)%2==0) {
+            std::wstring decoded; bool printable=true;
+            for(size_t i=2;i<line.size();i+=2) { wchar_t pair[3]={line[i],line[i+1],0}; wchar_t* end=nullptr; long b=wcstol(pair,&end,16); if(!end||*end||b<32||b>126){printable=false;break;} decoded.push_back((wchar_t)b); }
+            if(printable && !decoded.empty()) value=decoded; else if(vendorCode) value=L"код производителя SMBIOS "+line;
+        }
+        if(!result.empty()) result+=L"; "; result+=value;
+    }
+    return result.empty()?L"не предоставлено WMI/SMBIOS":result;
+}
+
 static std::wstring SmartctlCommand(const std::wstring& args, const SmartctlDevice& device) {
     return L"\"" + SmartctlPath() + L"\"" + device.options + L" " + args + L" " + device.path;
 }
@@ -700,9 +717,9 @@ static std::wstring HardwareReport() {
     else ss<<L"не удалось определить через Windows API\r\n";
     ss<<L"Доступно сейчас: "<<std::fixed<<std::setprecision(2)<<(double)memory.ullAvailPhys/1073741824.0<<L" ГБ из "<<(double)memory.ullTotalPhys/1073741824.0<<L" ГБ\r\n";
     ss<<L"\r\n=== МОДУЛИ ПАМЯТИ (WMI / SMBIOS) ===\r\n";
-    ss<<L"Производитель: "<<WmiQuery(L"SELECT Manufacturer FROM Win32_PhysicalMemory",L"Manufacturer");
-    ss<<L"Модель/Part Number: "<<WmiQuery(L"SELECT PartNumber FROM Win32_PhysicalMemory",L"PartNumber");
-    ss<<L"Объём модуля (байт): "<<WmiQuery(L"SELECT Capacity FROM Win32_PhysicalMemory",L"Capacity");
+    ss<<L"Производитель: "<<CleanWmiValues(WmiQuery(L"SELECT Manufacturer FROM Win32_PhysicalMemory",L"Manufacturer"),true)<<L"\r\n";
+    ss<<L"Модель/Part Number: "<<CleanWmiValues(WmiQuery(L"SELECT PartNumber FROM Win32_PhysicalMemory",L"PartNumber"))<<L"\r\n";
+    ss<<L"Объём модуля (байт): "<<CleanWmiValues(WmiQuery(L"SELECT Capacity FROM Win32_PhysicalMemory",L"Capacity"))<<L"\r\n";
     std::wstring smbiosType = WmiQuery(L"SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory",L"SMBIOSMemoryType");
     auto ddrName = [](const std::wstring& raw) -> std::wstring {
         std::wistringstream in(raw); std::wstring line, result;
