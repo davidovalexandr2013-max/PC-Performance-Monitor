@@ -1316,7 +1316,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CREATE: {
         g_window=hwnd;
         SetTimer(hwnd, 1, 2000, nullptr);
-        SetTimer(hwnd, 2, 10000, nullptr);
+        SetTimer(hwnd, 2, 10000, nullptr);\n        SetTimer(hwnd, 3, 1000, nullptr);
         SessionLog(L"MAIN_WINDOW_CREATED");
         CaptureProcessActivity();
         PCPMAds::InitGraphics(); PCPMAds::Refresh();
@@ -1333,7 +1333,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         AddButton(hwnd,L"Мониторинг",ID_HARDWARE,12,585,248); AddButton(hwnd,L"Быстрая проверка диска",ID_TEST_SHORT,12,644,248);
         AddButton(hwnd,L"Полная проверка диска",ID_TEST_LONG,12,703,248); AddButton(hwnd,L"Отмена проверки",ID_CANCEL_TEST,12,762,248);
         AddButton(hwnd,PCPMAds::Label().c_str(),ID_AD_BANNER,12,838,248);
-        g_output=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"Выберите раздел для просмотра подробных данных. Главная панель показывает текущие показатели компьютера.",WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY|ES_NOHIDESEL,280,865,1240,105,hwnd,(HMENU)200,g_instance,nullptr);
+        g_output=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"Выберите раздел слева или сверху для подробной диагностики. Недоступные аппаратные показатели будут отмечены отдельно.",WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY|ES_NOHIDESEL,280,755,1240,215,hwnd,(HMENU)200,g_instance,nullptr);
         g_status=CreateWindowW(L"STATIC",L"● Мониторинг: работает (фоновый режим)  •  Интернет: проверяется",WS_CHILD|WS_VISIBLE,12,984,1500,26,hwnd,(HMENU)201,g_instance,nullptr);
         return 0;
     }
@@ -1341,54 +1341,53 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_PAINT: {
         PAINTSTRUCT ps{}; HDC dc=BeginPaint(hwnd,&ps); RECT cr{}; GetClientRect(hwnd,&cr);
         HBRUSH bg=CreateSolidBrush(RGB(5,15,31));FillRect(dc,&cr,bg);DeleteObject(bg);
-        HBRUSH head=CreateSolidBrush(RGB(4,34,76));RECT hr{0,0,cr.right,96};FillRect(dc,&hr,head);DeleteObject(head);
+        HBRUSH head=CreateSolidBrush(RGB(4,34,76));RECT hr{0,0,cr.right,100};FillRect(dc,&hr,head);DeleteObject(head);
         DashText(dc,20,10,L"◉",38,RGB(45,205,255),true);
-        DashText(dc,78,12,L"PC Performance Monitor  v2.1.0 x64",25,RGB(255,255,255),true);
-        DashText(dc,78,48,L"ДИАГНОСТИКА ПК  •  МОНИТОРИНГ  •  SMART  •  DDR",14,RGB(150,210,245),true);
+        DashText(dc,98,8,L"PC Performance Monitor  v2.1.0 x64",25,RGB(255,255,255),true);
+        DashText(dc,590,48,L"ДИАГНОСТИКА  •  МОНИТОРИНГ  •  SMART  •  DDR",14,RGB(190,220,245),true);
+        const int left=280, right=cr.right-18, width=(std::max)(300,right-left);
         MEMORYSTATUSEX m{};m.dwLength=sizeof(m);GlobalMemoryStatusEx(&m);
         double cpu=CpuUsagePercent(), ram=(double)m.dwMemoryLoad;
         double load=(std::max)(cpu<0?0.0:cpu,ram);
         int score=load<=50?99:load<=75?75:load<=90?50:25;
         COLORREF health=score==99?RGB(45,220,120):score==75?RGB(180,220,65):score==50?RGB(255,175,45):RGB(245,75,75);
         const wchar_t* healthText=score==99?L"ОТЛИЧНО":score==75?L"НОРМАЛЬНО":score==50?L"ЕСТЬ ПРЕДУПРЕЖДЕНИЯ":L"КРИТИЧЕСКАЯ НАГРУЗКА";
-        DashPanel(dc,18,108,cr.right-36,104,L"ОЦЕНКА ТЕКУЩЕЙ НАГРУЗКИ");
-        wchar_t line[256]{};
-        swprintf_s(line,L"%d%%",score);DashText(dc,38,145,line,30,health,true);
-        DashText(dc,130,151,healthText,19,health,true);
-        DashText(dc,130,180,L"Оценка рассчитывается по текущей загрузке CPU и ОЗУ; это не оценка исправности оборудования.",13,RGB(190,215,235));
-        DashPanel(dc,18,226,cr.right-36,180,L"ТЕКУЩИЕ ПОКАЗАТЕЛИ");
-        swprintf_s(line,L"ЦП: %s",cpu<0?L"не удалось получить":(std::to_wstring((int)(cpu+0.5))+L"%").c_str());
-        DashText(dc,38,267,line,18,RGB(90,230,155),true);DashBar(dc,38,300,cr.right-100,14,cpu<0?0:cpu,RGB(55,205,130));
+        DashPanel(dc,left,108,width,100,L"ОЦЕНКА ТЕКУЩЕЙ НАГРУЗКИ");
+        wchar_t line[256]{};swprintf_s(line,L"%d%%",score);DashText(dc,left+20,147,line,29,health,true);
+        DashText(dc,left+112,151,healthText,18,health,true);
+        DashText(dc,left+112,180,L"Расчёт по загрузке CPU и ОЗУ; не является заключением об исправности оборудования.",13,RGB(190,215,235));
+        DashPanel(dc,left,220,width,176,L"ТЕКУЩИЕ ПОКАЗАТЕЛИ");
+        swprintf_s(line,cpu<0?L"ЦП: данные недоступны":L"ЦП: %.0f%%",cpu);DashText(dc,left+20,263,line,17,RGB(90,230,155),true);
+        DashBar(dc,left+20,292,width-55,13,cpu<0?0:cpu,RGB(55,205,130));
         swprintf_s(line,L"ОЗУ: %.2f ГБ занято из %.2f ГБ  •  свободно %.2f ГБ  •  %lu%%",
             (m.ullTotalPhys-m.ullAvailPhys)/1073741824.0,m.ullTotalPhys/1073741824.0,m.ullAvailPhys/1073741824.0,m.dwMemoryLoad);
-        DashText(dc,38,333,line,16,RGB(80,220,255),true);DashBar(dc,38,366,cr.right-100,14,ram,RGB(45,175,230));
-        int gap=14, col=(cr.right-36-gap*2)/3;
-        int x1=18,x2=x1+col+gap,x3=x2+col+gap;
-        DashPanel(dc,x1,420,col,150,L"ПРОЦЕССОР");
-        DashText(dc,x1+18,463,L"Загрузка в реальном времени",14);
-        swprintf_s(line,cpu<0?L"Недоступно":L"%.0f%%",cpu);DashText(dc,x1+18,498,line,28,health,true);
-        DashPanel(dc,x2,420,col,150,L"ОПЕРАТИВНАЯ ПАМЯТЬ");
+        DashText(dc,left+20,326,line,15,RGB(80,220,255),true);DashBar(dc,left+20,355,width-55,13,ram,RGB(45,175,230));
+        int gap=12,col=(width-gap*2)/3,x1=left,x2=x1+col+gap,x3=x2+col+gap;
+        DashPanel(dc,x1,410,col,146,L"ПРОЦЕССОР");
+        DashText(dc,x1+16,453,L"Загрузка в реальном времени",13);
+        swprintf_s(line,cpu<0?L"Недоступно":L"%.0f%%",cpu);DashText(dc,x1+16,487,line,26,health,true);
+        DashPanel(dc,x2,410,col,146,L"ОПЕРАТИВНАЯ ПАМЯТЬ");
         swprintf_s(line,L"%.2f / %.2f ГБ",(m.ullTotalPhys-m.ullAvailPhys)/1073741824.0,m.ullTotalPhys/1073741824.0);
-        DashText(dc,x2+18,463,line,22,RGB(80,220,255),true);swprintf_s(line,L"Использовано: %lu%%",m.dwMemoryLoad);DashText(dc,x2+18,505,line,15);
-        DashPanel(dc,x3,420,col,150,L"СИСТЕМНЫЙ ДИСК C:");
+        DashText(dc,x2+16,453,line,21,RGB(80,220,255),true);swprintf_s(line,L"Использовано: %lu%%",m.dwMemoryLoad);DashText(dc,x2+16,491,line,15);
+        DashPanel(dc,x3,410,col,146,L"СИСТЕМНЫЙ ДИСК C:");
         ULARGE_INTEGER freeB{},totalB{};if(GetDiskFreeSpaceExW(L"C:\\",&freeB,&totalB,nullptr)){
-            swprintf_s(line,L"Объём: %.1f ГБ",(double)totalB.QuadPart/1e9);DashText(dc,x3+18,463,line,17);
-            swprintf_s(line,L"Свободно: %.1f ГБ",(double)freeB.QuadPart/1e9);DashText(dc,x3+18,495,line,17,RGB(90,230,130),true);
-            double used=100.0*(1.0-(double)freeB.QuadPart/(double)totalB.QuadPart);DashBar(dc,x3+18,530,col-36,12,used,RGB(220,170,60));
-        } else DashText(dc,x3+18,470,L"Данные недоступны",15,RGB(255,170,80));
-        int half=(cr.right-50)/2;
-        DashPanel(dc,18,584,half,180,L"ОБОРУДОВАНИЕ И ДИАГНОСТИКА");
-        DashText(dc,38,628,L"SMART / NVMe Health Log:",15,RGB(80,220,255),true);
-        DashText(dc,38,658,L"Откройте раздел «Диски и SMART» для получения",14);
-        DashText(dc,38,682,L"фактических данных накопителей и самотестов.",14);
-        DashText(dc,38,724,L"Модули памяти DDR и характеристики — в разделе «ОЗУ (DDR)».",13);
-        DashPanel(dc,32+half,584,half,180,L"СИСТЕМНЫЕ СВЕДЕНИЯ");
+            swprintf_s(line,L"Объём: %.1f ГБ",(double)totalB.QuadPart/1e9);DashText(dc,x3+16,453,line,16);
+            swprintf_s(line,L"Свободно: %.1f ГБ",(double)freeB.QuadPart/1e9);DashText(dc,x3+16,483,line,16,RGB(90,230,130),true);
+            double used=100.0*(1.0-(double)freeB.QuadPart/(double)totalB.QuadPart);DashBar(dc,x3+16,520,col-32,10,used,RGB(220,170,60));
+        } else DashText(dc,x3+16,466,L"Данные недоступны",14,RGB(255,170,80));
+        int half=(width-12)/2;
+        DashPanel(dc,left,570,half,170,L"ОБОРУДОВАНИЕ И ДИАГНОСТИКА");
+        DashText(dc,left+18,612,L"SMART / NVMe Health Log:",14,RGB(80,220,255),true);
+        DashText(dc,left+18,640,L"Фактические параметры накопителей — в разделе",13);
+        DashText(dc,left+18,662,L"«Диски и SMART»; недоступные данные не подменяются.",13);
+        DashText(dc,left+18,704,L"Модули памяти и поколение DDR — в разделе «ОЗУ (DDR)».",13);
+        DashPanel(dc,left+half+12,570,half,170,L"СИСТЕМНЫЕ СВЕДЕНИЯ");
         unsigned count=0;HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
         if(snap!=INVALID_HANDLE_VALUE){PROCESSENTRY32W pe{};pe.dwSize=sizeof(pe);if(Process32FirstW(snap,&pe))do{++count;}while(Process32NextW(snap,&pe));CloseHandle(snap);}
-        swprintf_s(line,L"Активных процессов: %u",count);DashText(dc,52+half,628,line,15);
-        ULONGLONG installedKB=0;if(GetPhysicallyInstalledSystemMemory(&installedKB)){swprintf_s(line,L"Установлено ОЗУ: %.2f ГБ",(double)installedKB/1048576.0);DashText(dc,52+half,660,line,15);}
-        wchar_t module[MAX_PATH]{};DWORD n=GetModuleFileNameW(nullptr,module,MAX_PATH);if(n&&n<MAX_PATH){std::error_code ec;auto bytes=fs::file_size(fs::path(module),ec);if(!ec){swprintf_s(line,L"Размер EXE: %.2f МБ",(double)bytes/1048576.0);DashText(dc,52+half,692,line,15);}}
-        DashText(dc,52+half,724,L"Полный отчёт — кнопка «Отчёт» вверху.",14,RGB(90,220,255));
+        swprintf_s(line,L"Активных процессов: %u",count);DashText(dc,left+half+30,612,line,14);
+        ULONGLONG installedKB=0;if(GetPhysicallyInstalledSystemMemory(&installedKB)){swprintf_s(line,L"Установлено ОЗУ: %.2f ГБ",(double)installedKB/1048576.0);DashText(dc,left+half+30,642,line,14);}
+        wchar_t module[MAX_PATH]{};DWORD n=GetModuleFileNameW(nullptr,module,MAX_PATH);if(n&&n<MAX_PATH){std::error_code ec;auto bytes=fs::file_size(fs::path(module),ec);if(!ec){swprintf_s(line,L"Размер EXE: %.2f МБ",(double)bytes/1048576.0);DashText(dc,left+half+30,672,line,14);}}
+        DashText(dc,left+half+30,704,L"Подробный отчёт — кнопка «Отчёт» вверху.",13,RGB(90,220,255));
         EndPaint(hwnd,&ps);return 0;
     }
     case WM_DRAWITEM: {
@@ -1404,9 +1403,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HDC dc=(HDC)wp; SetTextColor(dc,RGB(220,235,250)); SetBkColor(dc,RGB(20,31,52));
         static HBRUSH b=CreateSolidBrush(RGB(20,31,52)); return (LRESULT)b;
     }
-    case WM_SIZE: { int w=LOWORD(lp),h=HIWORD(lp);if(g_output)MoveWindow(g_output,280,865,(std::max)(300,w-296),(std::max)(60,h-919),TRUE);if(g_status)MoveWindow(g_status,12,h-30,(std::max)(300,w-24),24,TRUE);InvalidateRect(hwnd,nullptr,FALSE);return 0; }
+    case WM_SIZE: { int w=LOWORD(lp),h=HIWORD(lp);if(g_output)MoveWindow(g_output,280,755,(std::max)(300,w-296),(std::max)(60,h-805),TRUE);if(g_status)MoveWindow(g_status,12,h-30,(std::max)(300,w-24),24,TRUE);InvalidateRect(hwnd,nullptr,FALSE);return 0; }
     case WM_TIMER:
-        if (wp == 1 && !g_closing) CaptureProcessActivity();
+        if (wp == 1 && !g_closing) CaptureProcessActivity();\n        if (wp == 3 && !g_closing) InvalidateRect(hwnd,nullptr,FALSE);
         if (wp == 2 && !g_closing) { PCPMAds::Rotate(); if (++g_adRefreshTicks >= 6) { g_adRefreshTicks=0; PCPMAds::Refresh(); } HWND ad=GetDlgItem(hwnd,ID_AD_BANNER); if(ad) SetWindowTextW(ad,PCPMAds::Label().c_str()); }
         return 0;
     case WM_COMMAND:
