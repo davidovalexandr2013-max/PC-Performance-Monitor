@@ -702,7 +702,7 @@ static std::wstring HardwareReport() {
     auto ddrName = [](const std::wstring& raw) -> std::wstring {
         std::wistringstream in(raw); std::wstring line, result;
         while (std::getline(in, line)) {
-            while (!line.empty() && (line.back()==L'\\r' || line.back()==L' ')) line.pop_back();
+            while (!line.empty() && (line.back()==L'\r' || line.back()==L' ')) line.pop_back();
             if (line.empty()) continue;
             std::wstring name = L"неизвестный тип SMBIOS (" + line + L")";
             try {
@@ -1406,7 +1406,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_SIZE: { int w=LOWORD(lp),h=HIWORD(lp);if(g_output)MoveWindow(g_output,280,755,(std::max)(300,w-296),(std::max)(60,h-805),TRUE);if(g_status)MoveWindow(g_status,12,h-30,(std::max)(300,w-24),24,TRUE);InvalidateRect(hwnd,nullptr,FALSE);return 0; }
     case WM_TIMER:
-        if (wp == 1 && !g_closing) CaptureProcessActivity();\n        if (wp == 3 && !g_closing) InvalidateRect(hwnd,nullptr,FALSE);
+        if (wp == 1 && !g_closing) CaptureProcessActivity();
+        if (wp == 3 && !g_closing) InvalidateRect(hwnd,nullptr,FALSE);
         if (wp == 2 && !g_closing) { PCPMAds::Rotate(); if (++g_adRefreshTicks >= 6) { g_adRefreshTicks=0; PCPMAds::Refresh(); } HWND ad=GetDlgItem(hwnd,ID_AD_BANNER); if(ad) SetWindowTextW(ad,PCPMAds::Label().c_str()); }
         return 0;
     case WM_COMMAND:
