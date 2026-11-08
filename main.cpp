@@ -856,20 +856,31 @@ static std::vector<ProcessRow> EnumerateProcessRows() {
 }
 static HWND g_processManager{},g_processList{};
 static void RefreshProcessList() {
-    if(!g_processList) return;
-    SendMessageW(g_processList,LVM_DELETEALLITEMS,0,0);
-    auto rows=EnumerateProcessRows();
-    for(const auto& p:rows) {
-        wchar_t pid[32]{},cpu[32]{},mem[64]{};
-        swprintf_s(pid,L"%lu (%s)",p.pid,p.name.c_str()); swprintf_s(cpu,L"%.1f%%",p.cpuPercent);
-        swprintf_s(mem,L"%.1f МБ",p.workingSet/1048576.0);
-        LVITEMW item{}; item.mask=LVIF_TEXT|LVIF_PARAM; item.iItem=(int)SendMessageW(g_processList,LVM_GETITEMCOUNT,0,0);
-        item.pszText=pid; item.lParam=(LPARAM)p.pid;
-        int index=(int)SendMessageW(g_processList,LVM_INSERTITEMW,0,(LPARAM)&item);
-        ListView_SetItemText(g_processList,index,1,cpu);
-        ListView_SetItemText(g_processList,index,2,mem);
-        ListView_SetItemText(g_processList,index,3,const_cast<LPWSTR>(p.name.c_str()));
-        ListView_SetItemText(g_processList,index,4,const_cast<LPWSTR>(p.description.c_str()));
+    HWND list=g_processList;
+    if(!list || !IsWindow(list)) return;
+    try {
+        SendMessageW(list,LVM_DELETEALLITEMS,0,0);
+        auto rows=EnumerateProcessRows();
+        for(const auto& p:rows) {
+            if(!IsWindow(list)) return;
+            wchar_t pid[96]{},cpu[32]{},mem[64]{};
+            swprintf_s(pid,L"%lu (%s)",p.pid,p.name.c_str());
+            swprintf_s(cpu,L"%.1f%%",p.cpuPercent);
+            swprintf_s(mem,L"%.1f МБ",p.workingSet/1048576.0);
+            LVITEMW item{}; item.mask=LVIF_TEXT|LVIF_PARAM;
+            item.iItem=(int)SendMessageW(list,LVM_GETITEMCOUNT,0,0);
+            item.pszText=pid; item.lParam=(LPARAM)p.pid;
+            int index=(int)SendMessageW(list,LVM_INSERTITEMW,0,(LPARAM)&item);
+            if(index<0) continue;
+            ListView_SetItemText(list,index,1,cpu);
+            ListView_SetItemText(list,index,2,mem);
+            ListView_SetItemText(list,index,3,const_cast<LPWSTR>(p.name.c_str()));
+            ListView_SetItemText(list,index,4,const_cast<LPWSTR>(p.description.c_str()));
+        }
+    } catch(const std::exception&) {
+        if(IsWindow(list)) MessageBoxW(g_processManager,L"Не удалось полностью сформировать список процессов. Нажмите «Обновить список» и повторите попытку.",L"Ошибка списка процессов",MB_OK|MB_ICONWARNING);
+    } catch(...) {
+        if(IsWindow(list)) MessageBoxW(g_processManager,L"Неизвестная ошибка при обновлении списка процессов.",L"Ошибка списка процессов",MB_OK|MB_ICONWARNING);
     }
 }
 static void TerminateSelectedProcess(HWND hwnd) {
@@ -891,6 +902,11 @@ static LRESULT CALLBACK ProcessManagerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM l
     case WM_CREATE: {
         g_processManager=hwnd;
         g_processList=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,10,10,1180,540,hwnd,(HMENU)5201,g_instance,nullptr);
+        if(!g_processList) {
+            DWORD error=GetLastError(); g_processManager=nullptr;
+            MessageBoxW(hwnd,(L"Не удалось создать таблицу процессов. Код Windows: "+std::to_wstring(error)).c_str(),L"Ошибка окна процессов",MB_OK|MB_ICONERROR);
+            return -1;
+        }
         ListView_SetExtendedListViewStyle(g_processList,LVS_EX_FULLROWSELECT|LVS_EX_GRIDLINES|LVS_EX_DOUBLEBUFFER);
         const wchar_t* titles[]={L"PID (программа)",L"CPU",L"ОЗУ",L"Процесс",L"Описание / назначение"};
         const int widths[]={80,80,100,220,650};
