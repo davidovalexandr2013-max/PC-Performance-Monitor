@@ -72,7 +72,26 @@ static unsigned g_adRefreshTicks = 0;
 static std::mutex g_uiMutex;
 static bool g_closing = false; // accessed on UI thread only
 static std::atomic<unsigned> g_activeTasks{0};
-static std::wstring g_smartctl = L"smartctl.exe";
+static std::wstring g_smartctl;
+static std::wstring ResolveSmartctlPath() {
+    wchar_t module[MAX_PATH]{};
+    DWORD n = GetModuleFileNameW(nullptr, module, MAX_PATH);
+    if (n && n < MAX_PATH) {
+        fs::path dir = fs::path(module).parent_path();
+        const fs::path candidates[] = { dir / L"smartctl.exe", dir / L"smartmontools" / L"smartctl.exe" };
+        for (const auto& candidate : candidates) {
+            std::error_code ec;
+            if (fs::is_regular_file(candidate, ec) && !ec) return candidate.wstring();
+        }
+    }
+    wchar_t found[MAX_PATH]{};
+    if (SearchPathW(nullptr, L"smartctl.exe", nullptr, MAX_PATH, found, nullptr)) return found;
+    return {};
+}
+static const std::wstring& SmartctlPath() {
+    if (g_smartctl.empty()) g_smartctl = ResolveSmartctlPath();
+    return g_smartctl;
+}
 static constexpr UINT WM_APP_RESULT = WM_APP + 41;
 
 static std::wstring Widen(const std::string& s) {
@@ -380,7 +399,9 @@ struct SmartctlDevice {
 };
 static std::vector<SmartctlDevice> SmartctlDevices() {
     std::vector<SmartctlDevice> devices;
-    const std::wstring scan = RunCapture(L"\"" + g_smartctl + L"\" --scan-open", 30000);
+    const auto& executable = SmartctlPath();
+    if (executable.empty()) return devices;
+    const std::wstring scan = RunCapture(L"\"" + executable + L"\" --scan-open", 30000);
     std::wistringstream lines(scan);
     std::wstring line;
     auto safeSmartctlToken = [](const std::wstring& token) {
@@ -398,14 +419,9 @@ static std::vector<SmartctlDevice> SmartctlDevices() {
         const std::wstring data = line.substr(first, comment == std::wstring::npos ? comment : comment-first);
         std::wistringstream tokens(data);
         SmartctlDevice item;
-        if (!(tokens >> item.path) || item.path.rfind(L"/dev/", 0) != 0 ||
-            !safeSmartctlToken(item.path)) continue;
-        std::wstring token;
-        bool validOptions = true;
-        while (tokens >> token) {
-            if (!safeSmartctlToken(token)) { validOptions = false; break; }
-            item.options += L" " + token;
-        }
+        if (!(tokens >> item.path) || item.path.rfind(L"/dev/", 0) != 0 || !safeSmartctlToken(item.path)) continue;
+        std::wstring token; bool validOptions = true;
+        while (tokens >> token) { if (!safeSmartctlToken(token)) { validOptions = false; break; } item.options += L" " + token; }
         if (!validOptions) continue;
         auto it = std::find_if(devices.begin(), devices.end(), [&](const SmartctlDevice& d) { return d.path == item.path; });
         if (it == devices.end()) devices.push_back(std::move(item));
@@ -414,12 +430,16 @@ static std::vector<SmartctlDevice> SmartctlDevices() {
     return devices;
 }
 static std::wstring SmartctlCommand(const std::wstring& args, const SmartctlDevice& device) {
-    return L"\"" + g_smartctl + L"\"" + device.options + L" " + args + L" " + device.path;
+    return L"\"" + SmartctlPath() + L"\"" + device.options + L" " + args + L" " + device.path;
 }
 static std::wstring SmartReport() {
     std::wstring report = NativeNvmeReport() + NativeAtaReport();
     report += L"\r\n=== smartctl --scan-open ===\r\n";
-    report += RunCapture(L"\"" + g_smartctl + L"\" --scan-open", 30000);
+    if (SmartctlPath().empty()) {
+        report += L"smartctl.exe не найден. Поместите его рядом с программой, в папку smartmontools или добавьте в PATH.\r\n";
+        return report;
+    }
+    report += RunCapture(L"\"" + SmartctlPath() + L"\" --scan-open", 30000);
     auto devices = SmartctlDevices();
     if (devices.empty()) {
         report += L"\r\nУстройства smartctl не обнаружены. Проверьте smartctl.exe и права администратора.\r\n";
@@ -434,7 +454,8 @@ static std::wstring SmartReport() {
 }
 static std::wstring SmartTests() {
     std::wstring report = L"=== Обнаружение устройств ===\r\n";
-    report += RunCapture(L"\"" + g_smartctl + L"\" --scan-open", 30000);
+    if (SmartctlPath().empty()) return report + L"smartctl.exe не найден. Диагностика self-test недоступна.\r\n";
+    report += RunCapture(L"\"" + SmartctlPath() + L"\" --scan-open", 30000);
     auto devices = SmartctlDevices();
     if (devices.empty()) return report + L"\r\nНет доступных устройств smartctl.\r\n";
     for (const auto& device : devices) {
@@ -444,6 +465,7 @@ static std::wstring SmartTests() {
     return report;
 }
 static std::wstring RunSmartTest(const wchar_t* option) {
+    if (SmartctlPath().empty()) return L"smartctl.exe не найден. Поместите его рядом с программой или в папку smartmontools.\r\n";
     auto devices = SmartctlDevices();
     if (devices.empty()) return L"Устройства smartctl не обнаружены.\r\n";
     std::wstring report;
@@ -492,8 +514,9 @@ static std::wstring TbwReport() {
     const std::wstring history = SnapshotPath();
     const std::wstring profile = AppDataDir() + L"\\ssd_tbw_profiles.csv";
     if (!fs::exists(profile)) {
+        // Never invent a drive's rated TBW. Enter the manufacturer's value manually.
         std::wofstream pf(profile);
-        if (pf) pf << L"disk_number,rated_tbw_TB\r\n0,600\r\n";
+        if (pf) pf << L"disk_number,rated_tbw_TB\r\n";
     }
     struct Snap { long long epoch; std::wstring units; };
     auto normalizeDecimal = [](const std::wstring& value, std::wstring& result) -> bool {
@@ -560,8 +583,8 @@ static std::wstring TbwReport() {
         std::sort(v.begin(), v.end(), [](const Snap& a, const Snap& b){ return a.epoch < b.epoch; });
         const auto& first = v.front(); const auto& last = v.back();
         const double totalTB = static_cast<double>(decimalToLongDouble(last.units) * 512000.0L / 1.0e12L);
-        ss << L"\r\nPhysicalDrive" << item.first << L": накопленная запись ≈ "
-           << std::fixed << std::setprecision(3) << totalTB << L" TB.";
+        ss << L"\r\nPhysicalDrive" << item.first << L": накопленная запись с момента первого снимка ≈ "
+           << std::fixed << std::setprecision(3) << totalTB << L" TB (не полный срок службы диска).";
         if (v.size() < 2 || last.epoch <= first.epoch ||
             last.units.size() < first.units.size() ||
             (last.units.size() == first.units.size() && last.units < first.units)) {
@@ -656,12 +679,18 @@ static std::wstring HardwareReport() {
     if(haveInstalled) ss<<std::fixed<<std::setprecision(2)<<(double)installedKB/1048576.0<<L" ГБ\r\n";
     else ss<<L"не удалось определить через Windows API\r\n";
     ss<<L"Доступно сейчас: "<<std::fixed<<std::setprecision(2)<<(double)memory.ullAvailPhys/1073741824.0<<L" ГБ из "<<(double)memory.ullTotalPhys/1073741824.0<<L" ГБ\r\n";
-    ss<<L"\r\n=== МОДУЛИ ПАМЯТИ (WMI) ===\r\n";
+    ss<<L"\r\n=== МОДУЛИ ПАМЯТИ (WMI / SMBIOS) ===\r\n";
     ss<<L"Производитель: "<<WmiQuery(L"SELECT Manufacturer FROM Win32_PhysicalMemory",L"Manufacturer");
     ss<<L"Модель/Part Number: "<<WmiQuery(L"SELECT PartNumber FROM Win32_PhysicalMemory",L"PartNumber");
-    ss<<L"Объём одного модуля (байт): "<<WmiQuery(L"SELECT Capacity FROM Win32_PhysicalMemory",L"Capacity");
+    ss<<L"Объём модуля (байт): "<<WmiQuery(L"SELECT Capacity FROM Win32_PhysicalMemory",L"Capacity");
+    ss<<L"Тип памяти (SMBIOS): "<<WmiQuery(L"SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory",L"SMBIOSMemoryType");
+    ss<<L"Тип памяти (WMI): "<<WmiQuery(L"SELECT MemoryType FROM Win32_PhysicalMemory",L"MemoryType");
     ss<<L"Скорость (MT/s): "<<WmiQuery(L"SELECT Speed FROM Win32_PhysicalMemory",L"Speed");
     ss<<L"Настроенная скорость (MT/s): "<<WmiQuery(L"SELECT ConfiguredClockSpeed FROM Win32_PhysicalMemory",L"ConfiguredClockSpeed");
+    ss<<L"Расположение модуля: "<<WmiQuery(L"SELECT DeviceLocator FROM Win32_PhysicalMemory",L"DeviceLocator");
+    ss<<L"Банк памяти: "<<WmiQuery(L"SELECT BankLabel FROM Win32_PhysicalMemory",L"BankLabel");
+    ss<<L"Напряжение (мВ): "<<WmiQuery(L"SELECT ConfiguredVoltage FROM Win32_PhysicalMemory",L"ConfiguredVoltage");
+    ss<<L"Счётчик включений/часов работы модулей: обычно не предоставляется SMBIOS/WMI; не вычисляется программно.\r\n";
     ss<<L"\r\n=== МАТЕРИНСКАЯ ПЛАТА / СИСТЕМА ===\r\n";
     ss<<L"Производитель: "<<WmiQuery(L"SELECT Manufacturer FROM Win32_ComputerSystem",L"Manufacturer");
     ss<<L"Модель: "<<WmiQuery(L"SELECT Model FROM Win32_ComputerSystem",L"Model");
@@ -681,7 +710,10 @@ static std::wstring HardwareReport() {
 
 static std::wstring EventReport(const wchar_t* channel, const wchar_t* label, DWORD maxEvents = 250) {
     std::wstringstream ss; ss << L"=== " << label << L" ===\r\n";
-    EVT_HANDLE query = EvtQuery(nullptr, channel, L"*", EvtQueryChannelPath | EvtQueryReverseDirection);
+    const wchar_t* xpath = (wcscmp(label, L"WHEA / аппаратные ошибки") == 0)
+        ? L"*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger']]]"
+        : L"*";
+    EVT_HANDLE query = EvtQuery(nullptr, channel, xpath, EvtQueryChannelPath | EvtQueryReverseDirection);
     if (!query) { ss << L"Журнал недоступен (код " << GetLastError() << L").\r\n"; return ss.str(); }
     std::array<EVT_HANDLE, 32> events{}; DWORD returned = 0, total = 0;
     while (total < maxEvents && EvtNext(query, (DWORD)events.size(), events.data(), 1000, 0, &returned)) {
@@ -702,7 +734,8 @@ static std::wstring EventReport(const wchar_t* channel, const wchar_t* label, DW
 }
 static std::wstring DiagnosticsReport() {
     return EventReport(L"System", L"WHEA / аппаратные ошибки") +
-        EventReport(L"Microsoft-Windows-MemoryDiagnostics-Results/Operational", L"Windows Memory Diagnostics");
+        EventReport(L"Microsoft-Windows-MemoryDiagnostics-Results/Operational", L"Windows Memory Diagnostics") +
+        EventReport(L"System", L"Критические завершения Windows (общий журнал)", 100);
 }
 
 struct ProcessRow {
