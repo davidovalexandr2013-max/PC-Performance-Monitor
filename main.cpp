@@ -1316,7 +1316,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CREATE: {
         g_window=hwnd;
         SetTimer(hwnd, 1, 2000, nullptr);
-        SetTimer(hwnd, 2, 10000, nullptr);\n        SetTimer(hwnd, 3, 1000, nullptr);
+        SetTimer(hwnd, 2, 10000, nullptr);
+        SetTimer(hwnd, 3, 1000, nullptr);
         SessionLog(L"MAIN_WINDOW_CREATED");
         CaptureProcessActivity();
         PCPMAds::InitGraphics(); PCPMAds::Refresh();
