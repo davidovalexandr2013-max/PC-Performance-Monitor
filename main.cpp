@@ -1385,10 +1385,110 @@ static std::wstring DashboardStats() {
  ULARGE_INTEGER freeB{},totalB{};bool disk=GetDiskFreeSpaceExW(L"C:\\",&freeB,&totalB,nullptr)!=FALSE;
  std::wstringstream o;o<<L"Процессов: "<<count<<L"   ОЗУ: "<<std::fixed<<std::setprecision(2)<<(m.ullTotalPhys-m.ullAvailPhys)/1073741824.0<<L" / "<<m.ullTotalPhys/1073741824.0<<L" ГБ ("<<m.dwMemoryLoad<<L"%)";if(disk)o<<L"   Диск C: свободно "<<freeB.QuadPart/1000000000.0<<L" ГБ";return o.str();
 }
+
+static constexpr UINT PCPM_TRAY_CALLBACK = WM_APP + 42;
+static constexpr UINT PCPM_TRAY_ID = 1;
+static NOTIFYICONDATAW g_trayData{};
+static HICON g_trayBroomIcon{};
+
+// Создаём собственную 32x32 иконку жёлтой метлы без внешних файлов ресурсов.
+static HICON CreateYellowBroomIcon() {
+    constexpr int S = 32;
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = S;
+    bi.bmiHeader.biHeight = -S;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* pixels = nullptr;
+    HDC screen = GetDC(nullptr);
+    HBITMAP color = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &pixels, nullptr, 0);
+    ReleaseDC(nullptr, screen);
+    if (!color || !pixels) { if (color) DeleteObject(color); return LoadIcon(nullptr, IDI_APPLICATION); }
+    std::memset(pixels, 0, S * S * 4);
+    HDC dc = CreateCompatibleDC(nullptr);
+    HGDIOBJ old = SelectObject(dc, color);
+    SetBkMode(dc, TRANSPARENT);
+
+    // Деревянная ручка метлы — диагональ от верхнего правого края к нижнему левому.
+    HPEN handlePen = CreatePen(PS_SOLID, 4, RGB(145, 76, 24));
+    HGDIOBJ oldPen = SelectObject(dc, handlePen);
+    MoveToEx(dc, 25, 3, nullptr); LineTo(dc, 9, 25);
+    SelectObject(dc, oldPen); DeleteObject(handlePen);
+    HPEN shinePen = CreatePen(PS_SOLID, 1, RGB(235, 177, 90));
+    oldPen = SelectObject(dc, shinePen);
+    MoveToEx(dc, 26, 3, nullptr); LineTo(dc, 10, 25);
+    SelectObject(dc, oldPen); DeleteObject(shinePen);
+
+    // Пучок ярко-жёлтой соломы.
+    POINT straw[] = {{7,19},{16,23},{12,31},{9,29},{6,31},{5,27},{2,28},{3,24}};
+    HBRUSH yellow = CreateSolidBrush(RGB(255, 205, 0));
+    HPEN outline = CreatePen(PS_SOLID, 1, RGB(173, 112, 0));
+    HGDIOBJ op = SelectObject(dc, outline), ob = SelectObject(dc, yellow);
+    Polygon(dc, straw, (int)(sizeof(straw)/sizeof(straw[0])));
+    SelectObject(dc, ob); SelectObject(dc, op);
+    DeleteObject(yellow); DeleteObject(outline);
+    HPEN strands = CreatePen(PS_SOLID, 1, RGB(255, 242, 92));
+    op = SelectObject(dc, strands);
+    MoveToEx(dc, 8, 23, nullptr); LineTo(dc, 6, 29);
+    MoveToEx(dc, 10, 24, nullptr); LineTo(dc, 9, 30);
+    MoveToEx(dc, 12, 24, nullptr); LineTo(dc, 12, 29);
+    MoveToEx(dc, 14, 23, nullptr); LineTo(dc, 15, 28);
+    SelectObject(dc, op); DeleteObject(strands);
+
+    SelectObject(dc, old); DeleteDC(dc);
+    HBITMAP mask = CreateBitmap(S, S, 1, 1, nullptr);
+    ICONINFO ii{}; ii.fIcon = TRUE; ii.hbmColor = color; ii.hbmMask = mask;
+    HICON icon = CreateIconIndirect(&ii);
+    DeleteObject(color); DeleteObject(mask);
+    return icon ? icon : LoadIcon(nullptr, IDI_APPLICATION);
+}
+static void AddYellowBroomTrayIcon(HWND hwnd) {
+    if (g_trayData.cbSize) return;
+    g_trayBroomIcon = CreateYellowBroomIcon();
+    g_trayData = {};
+    g_trayData.cbSize = sizeof(g_trayData);
+    g_trayData.hWnd = hwnd;
+    g_trayData.uID = PCPM_TRAY_ID;
+    g_trayData.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    g_trayData.uCallbackMessage = PCPM_TRAY_CALLBACK;
+    g_trayData.hIcon = g_trayBroomIcon;
+    wcscpy_s(g_trayData.szTip, L"PC Performance Monitor — жёлтая метла");
+    if (!Shell_NotifyIconW(NIM_ADD, &g_trayData)) {
+        g_trayData = {};
+        if (g_trayBroomIcon) DestroyIcon(g_trayBroomIcon);
+        g_trayBroomIcon = nullptr;
+        return;
+    }
+    g_trayData.uVersion = NOTIFYICON_VERSION;
+    Shell_NotifyIconW(NIM_SETVERSION, &g_trayData);
+}
+static void RemoveYellowBroomTrayIcon() {
+    if (g_trayData.cbSize) Shell_NotifyIconW(NIM_DELETE, &g_trayData);
+    g_trayData = {};
+    if (g_trayBroomIcon) DestroyIcon(g_trayBroomIcon);
+    g_trayBroomIcon = nullptr;
+}
+static void ShowTrayMenu(HWND hwnd) {
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    AppendMenuW(menu, MF_STRING, 1, L"Открыть PC Performance Monitor");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, 2, L"Выход");
+    POINT p{}; GetCursorPos(&p);
+    SetForegroundWindow(hwnd);
+    UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, p.x, p.y, 0, hwnd, nullptr);
+    DestroyMenu(menu);
+    if (cmd == 1) { ShowWindow(hwnd, SW_RESTORE); SetForegroundWindow(hwnd); }
+    else if (cmd == 2) SendMessageW(hwnd, WM_CLOSE, 0, 0);
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch(msg) {
     case WM_CREATE: {
         g_window=hwnd;
+        AddYellowBroomTrayIcon(hwnd);
         SetTimer(hwnd, 1, 2000, nullptr);
         SetTimer(hwnd, 2, 10000, nullptr);
         SetTimer(hwnd, 3, 1000, nullptr);
@@ -1560,6 +1660,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (!g_closing) { EnableWindow(hwnd,TRUE); SetForegroundWindow(hwnd); }
         return 0;
     }
+    case PCPM_TRAY_CALLBACK:
+        if (lp == WM_LBUTTONDBLCLK || lp == WM_LBUTTONUP) { ShowWindow(hwnd, SW_RESTORE); SetForegroundWindow(hwnd); return 0; }
+        if (lp == WM_RBUTTONUP || lp == WM_CONTEXTMENU) { ShowTrayMenu(hwnd); return 0; }
+        return 0;
     case WM_CLOSE:
         g_closing = true;
         if (g_activeTasks.load() != 0) {
@@ -1570,6 +1674,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
+        RemoveYellowBroomTrayIcon();
         KillTimer(hwnd, 1);
         KillTimer(hwnd, 2);
         KillTimer(hwnd, 3);
